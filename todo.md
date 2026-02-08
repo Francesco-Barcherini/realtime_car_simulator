@@ -1,0 +1,41 @@
+- modello dove esegue? PC ma confrontiamo anche con RPi (fa schifo)
+- server su PC che riceve stream video
+- object detection:
+  - classi: quelle del COCO dataset per il road traffic
+  - modello: YOLOn (più eventuali comparisons) + tracking di ultralytics
+  - modello va sul PC (no GPU)
+- detector distanza: Apple ml-depth-pro
+  - Stream -> frame -> model.track(frame, persist=True) -> bbox -> ml-depth-pro -> distanza -> plot
+- mouse control
+  - mouse collegato al RPi e invia i comandi al server
+  - sx gas
+  - dx freno
+  - nulla: freno motore
+  - traslazione dx-sx -> sterzo
+  - rotella -> autista che aggiunge ostacoli
+- Gioco:
+  - strada in 2D
+  - ostacoli che spawnano plottati secondo la pipeline YOLO + ml-depth-pro
+  - altri ostacoli virtuali generati
+    - random dall'applicazione
+    - dall'autista (rotella del mouse)
+    - si muovono secondo il movimento generato dalla macchina (simulato dal mouse)
+  - l'auto virtuale sta ferma (si muovono gli oggetti secondo detection o mouse) + si muove secondo i comandi del giocatore
+  - giocatore:
+    - usa le 4 frecce per aggiungere moto (somma vettoriale)
+    - gas, freno, rot sx, rot dx
+
+- Pipeline AI: Tet
+- Frontend: Tren
+- Mouse + Video RPi: Tet
+
+Interfacce
+- Streaming RPi -> Server: HTTP stream
+- Mouse RPi -> frontend: MQTT
+  - Topics: 
+    - speed, steering (angle) (publish ogni variazione del N%)
+    - obstacle
+- Pipeline AI -> frontend: MQTT
+  - Topics:
+    - objects:
+    - [{"id": 1, "class": "car", "bbox": [x, y, w, h], "distance": d}, ...]
