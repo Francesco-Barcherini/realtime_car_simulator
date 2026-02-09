@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Realtime Car Simulator</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="gameCanvas"></canvas>
+        
+        <!-- HUD Overlay -->
+        <div id="hud">
+            <div class="hud-panel top-left">
+                <h2>Realtime Car Simulator</h2>
+                <div class="hud-item">
+                    <span class="label">Speed:</span>
+                    <span id="speed-display">0</span>
+                    <span class="unit">km/h</span>
+                </div>
+                <div class="hud-item">
+                    <span class="label">Steering:</span>
+                    <span id="steering-display">0</span>
+                    <span class="unit">°</span>
+                </div>
+            </div>
+            
+            <div class="hud-panel top-right">
+                <div class="hud-item">
+                    <span class="label">Score:</span>
+                    <span id="score-display">0</span>
+                </div>
+                <div class="hud-item">
+                    <span class="label">Obstacles:</span>
+                    <span id="obstacles-display">0</span>
+                </div>
+            </div>
+            
+            <div class="hud-panel bottom-left">
+                <div class="hud-item status">
+                    <span class="label">MQTT:</span>
+                    <span id="mqtt-status" class="status-indicator disconnected">●</span>
+                    <span id="mqtt-status-text">Disconnected</span>
+                </div>
+            </div>
+            
+            <div class="hud-panel bottom-right">
+                <div class="controls-help">
+                    <p><strong>Controls:</strong></p>
+                    <p>↑ Gas | ↓ Brake</p>
+                    <p>← Left | → Right</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Game Over Screen -->
+        <div id="game-over" class="hidden">
+            <div class="game-over-content">
+                <h1>Game Over!</h1>
+                <p>Final Score: <span id="final-score">0</span></p>
+                <button id="restart-btn">Restart</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MQTT Client Library (Paho) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    
+    <!-- Game Scripts -->
+    <script src="config.js"></script>
+    <script src="obstacles.js"></script>
+    <script src="controls.js"></script>
+    <script src="renderer.js"></script>
+    <script src="mqtt-client.js"></script>
+    <script src="game.js"></script>
+</body>
+</html>
