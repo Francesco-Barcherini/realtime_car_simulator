@@ -94,19 +94,18 @@ def main():
     if not args.no_broker:
         mosquitto_proc = start_mosquitto(args.mqtt_port, args.ws_port)
 
-    # ── 2. Connect MQTT client ───────────────────────────────────
+    # ── 2. Connect MQTT client (retry until broker is reachable) ──
     mqtt_client = mqtt.Client(client_id="backend_server")
     mqtt_client.on_connect = on_connect
     mqtt_client.on_message = on_message
 
-    try:
-        mqtt_client.connect("localhost", args.mqtt_port, keepalive=60)
-    except ConnectionRefusedError:
-        print("[backend] ERROR: cannot connect to MQTT broker. "
-              "Is Mosquitto running?")
-        if mosquitto_proc:
-            mosquitto_proc.terminate()
-        sys.exit(1)
+    while True:
+        try:
+            mqtt_client.connect("localhost", args.mqtt_port, keepalive=60)
+            break
+        except (ConnectionRefusedError, OSError) as e:
+            print(f"[backend] MQTT broker not reachable ({e}) – retrying in 3 s…")
+            time.sleep(3)
 
     mqtt_client.loop_start()
 

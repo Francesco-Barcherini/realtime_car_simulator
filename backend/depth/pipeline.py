@@ -45,10 +45,18 @@ class VisionPipeline:
     def start(self):
         """Open the video stream and process frames until stopped."""
         self._running = True
-        cap = cv2.VideoCapture(self.stream_url)
 
-        if not cap.isOpened():
-            print(f"[pipeline] ERROR: cannot open stream {self.stream_url}")
+        # Wait for the camera stream to become available
+        print(f"[pipeline] Waiting for stream: {self.stream_url}")
+        cap = cv2.VideoCapture(self.stream_url)
+        while not cap.isOpened() and self._running:
+            print("[pipeline] Stream not available – retrying in 3 s…")
+            cap.release()
+            time.sleep(3)
+            cap = cv2.VideoCapture(self.stream_url)
+
+        if not self._running:
+            cap.release()
             return
 
         print(f"[pipeline] Connected to stream: {self.stream_url}")

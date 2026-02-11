@@ -31,10 +31,18 @@ def main():
                         help="HTTP camera stream port")
     args = parser.parse_args()
 
-    # ── MQTT client ───────────────────────────────────────────────
+    # ── MQTT client (retry until broker is reachable) ─────────────
     mqtt_client = mqtt.Client(client_id="rpi_device")
     mqtt_client.on_connect = on_connect
-    mqtt_client.connect(args.broker, args.mqtt_port, keepalive=60)
+
+    while True:
+        try:
+            mqtt_client.connect(args.broker, args.mqtt_port, keepalive=60)
+            break
+        except (ConnectionRefusedError, OSError) as e:
+            print(f"[device] MQTT broker not reachable ({e}) – retrying in 3 s…")
+            time.sleep(3)
+
     mqtt_client.loop_start()
 
     # ── Mouse tracker ─────────────────────────────────────────────
