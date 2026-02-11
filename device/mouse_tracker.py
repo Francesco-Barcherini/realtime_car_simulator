@@ -2,8 +2,8 @@
 """
 Mouse Tracker - Simulates car controls via mouse input.
 
-Runs on Raspberry Pi 3 B+. Uses pynput to capture mouse events
-and publishes speed, steering, and obstacle events via MQTT.
+Runs on Raspberry Pi 3 B+. Uses evdev to read mouse events directly
+from the kernel input subsystem – no X server / display required.
 
 Controls:
   - Left click held:  accelerating
@@ -17,7 +17,8 @@ import time
 import json
 import threading
 import paho.mqtt.client as mqtt
-from pynput import mouse
+import evdev
+from evdev import InputDevice, categorize, ecodes
 
 # ── Physics constants ────────────────────────────────────────────────
 MAX_SPEED = 200.0        # km/h (arbitrary game units)
@@ -34,68 +35,95 @@ STEERING_PUBLISH_THRESHOLD = 0.5  # degrees dead-zone for publish
 PHYSICS_HZ = 60  # physics update rate
 
 
-class MouseTracker:
-    """Captures mouse events via pynput and maintains car speed / steering state."""
+def find_mouse_device():
+    """Auto-detect the first device that looks like a mouse."""
+    devices = [InputDevice(path) for path in evdev.list_devices()]
+    for dev in devices:
+        caps = dev.capabilities(verbose=False)
+        # A mouse has REL axes (EV_REL = 2) and keys/buttons (EV_KEY = 1)
+        if ecodes.EV_REL in caps and ecodes.EV_KEY in caps:
+            print(f"[mouse_tracker] Found mouse: {dev.name} ({dev.path})")
+            return dev
+    return None
 
-    def __init__(self, mqtt_client: mqtt.Client):
+
+class MouseTracker:
+    """Reads mouse events via evdev and maintains car speed / steering state."""
+
+    def __init__(self, mqtt_client: mqtt.Client, device_path: str = None):
         self.mqtt = mqtt_client
+        self._device_path = device_path
 
         # ── state ─────────────────────────────────────────────────
         self.speed = 0.0          # current speed [0 .. MAX_SPEED]
         self.steering_angle = 0.0 # current steering [-MAX .. +MAX]
         self.x_displacement = 0.0 # accumulated X displacement from origin
-        self._origin_x: float | None = None  # set on first move event
 
         self.left_pressed = False
         self.right_pressed = False
 
-        # last‑published values (for threshold comparison)
+        # last-published values (for threshold comparison)
         self._last_pub_speed = -1.0
         self._last_pub_steering = -999.0
 
         self._running = False
-        self._listener: mouse.Listener | None = None
 
     # ── public API ────────────────────────────────────────────────
     def start(self):
-        """Start pynput listener + physics thread."""
+        """Start evdev reader + physics thread."""
         self._running = True
-
-        # pynput listener runs in its own daemon thread
-        self._listener = mouse.Listener(
-            on_move=self._on_move,
-            on_click=self._on_click,
-            on_scroll=self._on_scroll,
-        )
-        self._listener.start()
-
+        threading.Thread(target=self._read_mouse, daemon=True).start()
         threading.Thread(target=self._physics_loop, daemon=True).start()
 
     def stop(self):
         self._running = False
-        if self._listener is not None:
-            self._listener.stop()
 
-    # ── pynput callbacks ─────────────────────────────────────────
-    def _on_move(self, x: int, y: int):
-        """Track mouse X position; displacement from the initial position
-        drives the steering angle."""
-        if self._origin_x is None:
-            self._origin_x = x
-        self.x_displacement = x - self._origin_x
+    # ── evdev event loop ─────────────────────────────────────────
+    def _read_mouse(self):
+        """Read events from the mouse input device (no X server needed)."""
+        try:
+            if self._device_path:
+                dev = InputDevice(self._device_path)
+                print(f"[mouse_tracker] Using device: {dev.name} ({dev.path})")
+            else:
+                dev = find_mouse_device()
+                if dev is None:
+                    print("[mouse_tracker] No mouse device found – "
+                          "running without mouse (use test_mqtt.py to simulate).")
+                    return
 
-    def _on_click(self, x: int, y: int, button: mouse.Button, pressed: bool):
-        """Left = accelerate, Right = brake, Middle = obstacle."""
-        if button == mouse.Button.left:
-            self.left_pressed = pressed
-        elif button == mouse.Button.right:
-            self.right_pressed = pressed
-        elif button == mouse.Button.middle and pressed:
-            self._publish_obstacle()
+            # Grab the device so events don't leak to other consumers
+            dev.grab()
 
-    def _on_scroll(self, x: int, y: int, dx: int, dy: int):
-        """Any scroll event creates an obstacle."""
-        self._publish_obstacle()
+            for event in dev.read_loop():
+                if not self._running:
+                    break
+
+                # ── relative movement (EV_REL) ────────────────────
+                if event.type == ecodes.EV_REL:
+                    if event.code == ecodes.REL_X:
+                        self.x_displacement += event.value
+                    elif event.code == ecodes.REL_WHEEL:
+                        # scroll wheel → obstacle
+                        self._publish_obstacle()
+
+                # ── button press / release (EV_KEY) ───────────────
+                elif event.type == ecodes.EV_KEY:
+                    # value: 1 = pressed, 0 = released
+                    if event.code == ecodes.BTN_LEFT:
+                        self.left_pressed = (event.value == 1)
+                    elif event.code == ecodes.BTN_RIGHT:
+                        self.right_pressed = (event.value == 1)
+                    elif event.code == ecodes.BTN_MIDDLE and event.value == 1:
+                        self._publish_obstacle()
+
+            dev.ungrab()
+
+        except PermissionError:
+            print("[mouse_tracker] Permission denied – run with sudo "
+                  "or add user to the 'input' group.")
+        except FileNotFoundError as e:
+            print(f"[mouse_tracker] Device not found: {e}")
 
     # ── physics loop ─────────────────────────────────────────────
     def _physics_loop(self):

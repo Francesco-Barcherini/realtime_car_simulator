@@ -9,6 +9,7 @@ Uses OpenCV VideoCapture to grab frames from the default camera device.
 import time
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from typing import Optional
 
 import cv2
 
@@ -59,7 +60,7 @@ class CameraCapture:
 
 
 # ── MJPEG HTTP handler ───────────────────────────────────────────
-_camera: CameraCapture | None = None
+_camera: Optional[CameraCapture] = None
 
 
 class MJPEGHandler(BaseHTTPRequestHandler):
