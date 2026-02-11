@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug – Realtime Car Simulator</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: #0f0f1a;
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+
+        /* ── header bar ─────────────────────────────────── */
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 24px;
+            background: #1a1a2e;
+            border-bottom: 1px solid #2d2d44;
+        }
+        header h1 { font-size: 1.2rem; color: #f1c40f; }
+
+        .status-bar {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            font-size: 0.85rem;
+        }
+        .status-dot {
+            display: inline-block;
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            margin-right: 4px;
+        }
+        .status-dot.on  { background: #2ecc71; }
+        .status-dot.off { background: #e74c3c; }
+
+        /* ── source selector ────────────────────────────── */
+        .source-panel {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 24px;
+            background: #16162a;
+        }
+        .source-panel label { font-size: 0.9rem; font-weight: 600; }
+        .source-panel select,
+        .source-panel input,
+        .source-panel button {
+            padding: 6px 12px;
+            border: 1px solid #3d3d5c;
+            border-radius: 4px;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            font-size: 0.85rem;
+        }
+        .source-panel button {
+            background: #2980b9;
+            border-color: #2980b9;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        .source-panel button:hover { background: #3498db; }
+
+        /* ── main grid ──────────────────────────────────── */
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            padding: 16px 24px;
+        }
+        .panel {
+            background: #1a1a2e;
+            border: 1px solid #2d2d44;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .panel-title {
+            padding: 8px 14px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            background: #16162a;
+            color: #aaa;
+        }
+        .panel img {
+            display: block;
+            width: 100%;
+            height: auto;
+            background: #000;
+            min-height: 200px;
+        }
+
+        /* ── objects table ──────────────────────────────── */
+        .panel-body { padding: 10px 14px; max-height: 320px; overflow-y: auto; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.82rem;
+        }
+        th, td {
+            text-align: left;
+            padding: 4px 8px;
+            border-bottom: 1px solid #2d2d44;
+        }
+        th { color: #aaa; font-weight: 600; }
+
+        @media (max-width: 900px) {
+            .grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>🔍 Debug View</h1>
+    <div class="status-bar">
+        <span><span id="mqtt-dot" class="status-dot off"></span>MQTT: <span id="mqtt-label">Disconnected</span></span>
+        <span>FPS: <span id="fps-label">–</span></span>
+    </div>
+</header>
+
+<!-- ── source selector ──────────────────────────────────── -->
+<div class="source-panel">
+    <label>Video Source:</label>
+    <select id="source-select">
+        <option value="camera">📷 Camera</option>
+        <option value="file">🎞️ Video file</option>
+    </select>
+    <input id="file-path" type="text" placeholder="filename inside device/video/ (e.g. driving.mp4)" style="width:340px; display:none;">
+    <button id="apply-source">Apply</button>
+</div>
+
+<!-- ── panels ───────────────────────────────────────────── -->
+<div class="grid">
+    <!-- 1. Raw video stream -->
+    <div class="panel">
+        <div class="panel-title">Original Stream</div>
+        <img id="img-stream" alt="waiting for stream…">
+    </div>
+
+    <!-- 2. Annotated frame (bboxes) -->
+    <div class="panel">
+        <div class="panel-title">Detections (YOLO + Tracking)</div>
+        <img id="img-annotated" alt="waiting for detections…">
+    </div>
+
+    <!-- 3. Depth heatmap -->
+    <div class="panel">
+        <div class="panel-title">Depth Heatmap (ViTS)</div>
+        <img id="img-depth" alt="waiting for depth…">
+    </div>
+
+    <!-- 4. Detected objects table -->
+    <div class="panel">
+        <div class="panel-title">Detected Objects</div>
+        <div class="panel-body">
+            <table>
+                <thead><tr><th>ID</th><th>Class</th><th>Distance</th><th>BBox</th></tr></thead>
+                <tbody id="objects-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- ── scripts ──────────────────────────────────────────── -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+<script src="config.js"></script>
+<script>
+(function () {
+    // ── DOM refs ─────────────────────────────────────────────
+    const imgStream    = document.getElementById('img-stream');
+    const imgAnnotated = document.getElementById('img-annotated');
+    const imgDepth     = document.getElementById('img-depth');
+    const objectsTbody = document.getElementById('objects-tbody');
+    const mqttDot      = document.getElementById('mqtt-dot');
+    const mqttLabel    = document.getElementById('mqtt-label');
+    const fpsLabel     = document.getElementById('fps-label');
+
+    const sourceSelect = document.getElementById('source-select');
+    const filePathInput = document.getElementById('file-path');
+    const applyBtn      = document.getElementById('apply-source');
+
+    // ── Device stream URL (same host, port 5000) ────────────
+    const DEVICE_HOST = window.location.hostname || 'localhost';
+    const DEVICE_PORT = 5000;
+    imgStream.src = 'http://' + DEVICE_HOST + ':' + DEVICE_PORT + '/video';
+
+    // ── Source selector UI ──────────────────────────────────
+    sourceSelect.addEventListener('change', () => {
+        filePathInput.style.display = sourceSelect.value === 'file' ? '' : 'none';
+    });
+
+    applyBtn.addEventListener('click', () => {
+        const base = 'http://' + DEVICE_HOST + ':' + DEVICE_PORT;
+        let url;
+        if (sourceSelect.value === 'camera') {
+            url = base + '/source/camera';
+        } else {
+            const path = filePathInput.value.trim();
+            if (!path) { alert('Enter a filename'); return; }
+            url = base + '/source/file?path=' + encodeURIComponent(path);
+        }
+        fetch(url, { method: 'POST' })
+            .then(r => r.json())
+            .then(d => {
+                console.log('Source switched:', d);
+                // force stream reload
+                imgStream.src = '';
+                setTimeout(() => {
+                    imgStream.src = base + '/video?' + Date.now();
+                }, 500);
+            })
+            .catch(e => alert('Failed to switch source: ' + e));
+    });
+
+    // ── FPS counter ─────────────────────────────────────────
+    let frameCount = 0;
+    let lastFpsTime = performance.now();
+    function tickFps() {
+        frameCount++;
+        const now = performance.now();
+        if (now - lastFpsTime >= 1000) {
+            fpsLabel.textContent = frameCount;
+            frameCount = 0;
+            lastFpsTime = now;
+        }
+    }
+
+    // ── MQTT connection ─────────────────────────────────────
+    const clientId = 'debug_' + Math.random().toString(16).substr(2, 8);
+    const client = new Paho.MQTT.Client(CONFIG.mqtt.broker, CONFIG.mqtt.port, clientId);
+
+    client.onConnectionLost = function (resp) {
+        mqttDot.className = 'status-dot off';
+        mqttLabel.textContent = 'Disconnected';
+        setTimeout(mqttConnect, 3000);
+    };
+
+    client.onMessageArrived = function (msg) {
+        const topic = msg.destinationName;
+        try {
+            const data = JSON.parse(msg.payloadString);
+
+            if (topic === CONFIG.mqtt.topics.aiDebug) {
+                // annotated frame + depth heatmap as base64 JPEG
+                if (data.annotated) imgAnnotated.src = 'data:image/jpeg;base64,' + data.annotated;
+                if (data.depth)     imgDepth.src     = 'data:image/jpeg;base64,' + data.depth;
+                tickFps();
+            }
+
+            if (topic === CONFIG.mqtt.topics.aiObjects) {
+                renderObjects(Array.isArray(data) ? data : []);
+            }
+        } catch (e) {
+            console.error('parse error:', e);
+        }
+    };
+
+    function mqttConnect() {
+        client.connect({
+            onSuccess: function () {
+                mqttDot.className = 'status-dot on';
+                mqttLabel.textContent = 'Connected';
+                client.subscribe('ai/#');
+            },
+            onFailure: function () {
+                mqttDot.className = 'status-dot off';
+                mqttLabel.textContent = 'Disconnected';
+                setTimeout(mqttConnect, 3000);
+            },
+            keepAliveInterval: 30,
+            timeout: 10
+        });
+    }
+    mqttConnect();
+
+    // ── Objects table ───────────────────────────────────────
+    function renderObjects(objects) {
+        if (objects.length === 0) {
+            objectsTbody.innerHTML = '<tr><td colspan="4" style="color:#666">No objects detected</td></tr>';
+            return;
+        }
+        objectsTbody.innerHTML = objects.map(o => {
+            const dist = o.distance != null ? o.distance.toFixed(1) + ' m' : '–';
+            const bbox = o.bbox.map(v => Math.round(v)).join(', ');
+            return '<tr><td>#' + o.id + '</td><td>' + o.class + '</td><td>' + dist + '</td><td>' + bbox + '</td></tr>';
+        }).join('');
+    }
+})();
+</script>
+</body>
+</html>

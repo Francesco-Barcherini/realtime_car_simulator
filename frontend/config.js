@@ -2,15 +2,17 @@
 
 const CONFIG = {
     // MQTT Configuration
+    // broker defaults to the same host serving this page (works out of the box)
     mqtt: {
-        broker: '10.30.7.42', // Server IP from conf.conf
+        broker: window.location.hostname || 'localhost',
         port: 9001, // WebSocket port (default for MQTT over WebSocket)
         clientId: 'car_simulator_' + Math.random().toString(16).substr(2, 8),
         topics: {
             mouseSpeed: 'mouse/speed',
             mouseSteering: 'mouse/steering',
             mouseObstacle: 'mouse/obstacle',
-            aiObjects: 'ai/objects'
+            aiObjects: 'ai/objects',
+            aiDebug: 'ai/debug'
         }
     },
 

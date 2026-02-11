@@ -2,16 +2,64 @@
 """
 Vision Pipeline – orchestrates video capture → YOLO detection → depth
 estimation and publishes results via MQTT.
+
+Also publishes debug frames (annotated + depth heatmap) for the
+frontend debug page.
 """
 
 import time
 import json
+import base64
 import cv2
 import numpy as np
 import paho.mqtt.client as mqtt
 
 from .detector import ObjectDetector
 from .depth_estimator import DepthEstimator
+
+# Colors for bounding boxes per class
+_CLASS_COLORS = {
+    "person": (71, 107, 255),     # red-ish (BGR)
+    "car": (209, 183, 69),        # blue-ish
+    "motorcycle": (122, 160, 255),# orange-ish
+}
+
+
+def _annotate_frame(frame: np.ndarray, detections: list) -> np.ndarray:
+    """Draw bboxes with class, id, and distance on a copy of the frame."""
+    vis = frame.copy()
+    for det in detections:
+        cx, cy, w, h = det["bbox"]
+        x1 = int(cx - w / 2)
+        y1 = int(cy - h / 2)
+        x2 = int(cx + w / 2)
+        y2 = int(cy + h / 2)
+
+        color = _CLASS_COLORS.get(det["class"], (0, 255, 0))
+        cv2.rectangle(vis, (x1, y1), (x2, y2), color, 2)
+
+        dist_str = f'{det["distance"]:.1f}m' if det.get("distance") is not None else "?"
+        label = f'{det["class"]} #{det["id"]} {dist_str}'
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+        cv2.rectangle(vis, (x1, y1 - th - 6), (x1 + tw + 4, y1), color, -1)
+        cv2.putText(vis, label, (x1 + 2, y1 - 4),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    return vis
+
+
+def _depth_to_heatmap(depth_map: np.ndarray) -> np.ndarray:
+    """Convert a float32 depth map to a BGR colormap image."""
+    if depth_map is None:
+        return np.zeros((480, 640, 3), dtype=np.uint8)
+    norm = cv2.normalize(depth_map, None, 0, 255, cv2.NORM_MINMAX)
+    gray = norm.astype(np.uint8)
+    return cv2.applyColorMap(gray, cv2.COLORMAP_MAGMA)
+
+
+def _encode_jpeg_b64(image: np.ndarray, quality: int = 60) -> str:
+    """Encode a BGR image to a base64 JPEG string."""
+    _, buf = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+    return base64.b64encode(buf.tobytes()).decode("ascii")
 
 
 class VisionPipeline:
@@ -87,18 +135,28 @@ class VisionPipeline:
 
                 # ── 2. Depth estimation (one map per frame) ──────
                 dt_depth = 0.0
-                if detections:
-                    t_depth = time.time()
-                    self.estimator.compute_depth_map(frame)
+                t_depth = time.time()
+                self.estimator.compute_depth_map(frame)
 
+                if detections:
                     for det in detections:
                         depth = self.estimator.get_depth_for_bbox(det["bbox"])
                         det["distance"] = round(depth, 2) if depth is not None else None
-                    dt_depth = time.time() - t_depth
+                dt_depth = time.time() - t_depth
 
-                # ── 3. Publish via MQTT ──────────────────────────
+                # ── 3. Publish detections via MQTT ───────────────
                 payload = json.dumps(detections)
                 self.mqtt.publish("ai/objects", payload)
+
+                # ── 4. Publish debug frames ──────────────────────
+                annotated = _annotate_frame(frame, detections)
+                heatmap = _depth_to_heatmap(self.estimator._depth_map)
+
+                debug_payload = json.dumps({
+                    "annotated": _encode_jpeg_b64(annotated),
+                    "depth": _encode_jpeg_b64(heatmap),
+                })
+                self.mqtt.publish("ai/debug", debug_payload)
 
                 dt_total = time.time() - t_start
                 frame_count += 1

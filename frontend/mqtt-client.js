@@ -6,7 +6,6 @@ class MQTTClient {
         this.connected = false;
         this.onMessageCallback = onMessageCallback;
         this.reconnectAttempts = 0;
-        this.maxReconnectAttempts = 5;
     }
 
     // Connect to MQTT broker
@@ -60,14 +59,10 @@ class MQTTClient {
         this.connected = false;
         this.updateStatus(false);
 
-        // Retry connection
-        if (this.reconnectAttempts < this.maxReconnectAttempts) {
-            this.reconnectAttempts++;
-            console.log(`Retrying connection (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
-            setTimeout(() => this.connect(), 5000);
-        } else {
-            console.error('Max reconnection attempts reached');
-        }
+        // Retry connection indefinitely
+        this.reconnectAttempts++;
+        console.log(`Retrying connection (attempt ${this.reconnectAttempts})...`);
+        setTimeout(() => this.connect(), 3000);
     }
 
     // Connection lost
