@@ -1,0 +1,6 @@
+# Device requirements (Raspberry Pi 3 B+ with Raspbian Buster)
+paho-mqtt>=1.6,<2.0
+pynput>=1.7
+opencv-python-headless>=4.5
+# picamera2 is pre-installed on Raspberry Pi OS Bullseye+
+# For older Raspbian Buster, use: picamera
