@@ -2,7 +2,7 @@
 
 const CONFIG = {
     // MQTT Configuration
-    // broker defaults to the same host serving this page (works out of the box)
+    // broker runs on the backend PC (same machine as Mosquitto)
     mqtt: {
         broker: window.location.hostname || 'localhost',
         port: 9001, // WebSocket port (default for MQTT over WebSocket)
@@ -14,6 +14,12 @@ const CONFIG = {
             aiObjects: 'ai/objects',
             aiDebug: 'ai/debug'
         }
+    },
+
+    // Device (Raspberry Pi) – camera stream lives here
+    device: {
+        host: '10.1.56.79',  // RPi IP from conf.conf
+        streamPort: 5000
     },
 
     // Game Physics

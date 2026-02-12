@@ -13,9 +13,10 @@ class Renderer {
     // Main render function
     render(gameState) {
         this.clear();
-        this.drawRoad(gameState.velocity.y);
+        const worldSpeedPx = (gameState.worldSpeed || 0) / 0.36;
+        this.drawRoad(worldSpeedPx);
         this.drawObstacles(gameState.obstacles);
-        this.drawCar(gameState.carRotation);
+        this.drawCar(gameState.carX, gameState.carY, gameState.carAngle);
     }
 
     // Clear canvas
@@ -44,8 +45,8 @@ class Renderer {
         this.ctx.stroke();
 
         // Lane dividers (scrolling dashed lines)
-        this.roadOffset += scrollSpeed * 0.016; // Approximate deltaTime
-        if (this.roadOffset > 60) this.roadOffset = 0;
+        this.roadOffset -= scrollSpeed * 0.016; // negative so dashes move top→bottom
+        this.roadOffset = ((this.roadOffset % 60) + 60) % 60; // wrap both directions
 
         this.ctx.strokeStyle = CONFIG.colors.roadLine;
         this.ctx.lineWidth = 3;
@@ -97,9 +98,9 @@ class Renderer {
             this.ctx.textAlign = 'center';
             this.ctx.fillText(obstacle.class, 0, -h / 2 - 5);
 
-            // Distance
-            if (obstacle.distance) {
-                this.ctx.fillText(`${obstacle.distance.toFixed(1)}m`, 0, h / 2 + 15);
+            // Distance (relative depth)
+            if (obstacle.distance != null) {
+                this.ctx.fillText(`d:${Math.round(obstacle.distance)}`, 0, h / 2 + 15);
             }
         } else if (obstacle.type === 'random') {
             // Random obstacles - draw as cones
@@ -131,15 +132,13 @@ class Renderer {
         this.ctx.restore();
     }
 
-    // Draw the player's car
-    drawCar(rotation) {
-        const x = CONFIG.car.x;
-        const y = CONFIG.car.y;
+    // Draw the player's car at its current position
+    drawCar(carX, carY, rotation) {
         const w = CONFIG.car.width;
         const h = CONFIG.car.height;
 
         this.ctx.save();
-        this.ctx.translate(x, y);
+        this.ctx.translate(carX, carY);
         this.ctx.rotate((rotation || 0) * Math.PI / 180);
 
         // Car body

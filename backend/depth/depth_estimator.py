@@ -4,9 +4,13 @@ Depth Estimator – computes per-object depth using
 Depth-Anything-V2-Small (ViTS) from Hugging Face Transformers.
 
 For each bounding box:
-  1. Crop the central 60 % of the bbox width (remove 20 % on each side).
+  1. Crop the central 40 % of the bbox (remove 30 % on each side for
+     both width and height).
   2. Sample a 10×10 grid of points inside that crop.
   3. Return the median depth of those sampled points.
+
+NOTE: Values are *relative* depth (0–255 range), NOT metric metres.
+      Higher values ≈ closer to the camera.
 """
 
 import numpy as np
@@ -44,16 +48,23 @@ class DepthEstimator:
 
         result = self.pipe(pil_image)
         # result["depth"] is a PIL image; convert to float array
-        self._depth_map = np.array(result["depth"], dtype=np.float32)
+        raw = np.array(result["depth"], dtype=np.float32)
+        # Normalize to 0–255 per-frame so values span the full range
+        dmin, dmax = raw.min(), raw.max()
+        if dmax > dmin:
+            self._depth_map = (raw - dmin) / (dmax - dmin) * 255.0
+        else:
+            self._depth_map = np.zeros_like(raw)
 
     def get_depth_for_bbox(self, bbox: list[float]) -> float | None:
         """
         Compute median depth for a bounding box [cx, cy, w, h] (xywh format).
 
         Strategy:
-          - Remove 20 % of width on each side → keep central 60 %.
+          - Remove 30 % of width on each side → keep central 40 %.
+          - Remove 30 % of height on each side → keep central 40 %.
           - Sample a 10×10 grid inside that region.
-          - Return the median depth value.
+          - Return the median depth value (relative, 0–255).
 
         Returns:
             Median depth (float) or None if depth map is not available.
@@ -70,16 +81,19 @@ class DepthEstimator:
         x2 = cx + w / 2.0
         y2 = cy + h / 2.0
 
-        # Remove 20 % on each side of the width
-        margin = w * 0.2
-        x1_crop = x1 + margin
-        x2_crop = x2 - margin
+        # Remove 30 % on each side of width AND height → keep central 40 %
+        margin_w = w * 0.3
+        margin_h = h * 0.3
+        x1_crop = x1 + margin_w
+        x2_crop = x2 - margin_w
+        y1_crop = y1 + margin_h
+        y2_crop = y2 - margin_h
 
         # Clamp to image bounds
         x1_crop = max(0, int(round(x1_crop)))
         x2_crop = min(w_img - 1, int(round(x2_crop)))
-        y1_crop = max(0, int(round(y1)))
-        y2_crop = min(h_img - 1, int(round(y2)))
+        y1_crop = max(0, int(round(y1_crop)))
+        y2_crop = min(h_img - 1, int(round(y2_crop)))
 
         if x2_crop <= x1_crop or y2_crop <= y1_crop:
             return None

@@ -9,8 +9,17 @@ Returns bounding boxes with persistent track IDs.
 from ultralytics import YOLO
 
 
-# COCO class IDs we care about
-TARGET_CLASSES = {0: "person", 2: "car", 3: "motorcycle"}
+# COCO class IDs we care about (road traffic objects)
+TARGET_CLASSES = {
+    0: "person",
+    1: "bicycle",
+    2: "car",
+    3: "motorcycle",
+    5: "bus",
+    7: "truck",
+    9: "traffic light",
+    11: "stop sign",
+}
 TARGET_CLASS_IDS = list(TARGET_CLASSES.keys())
 
 

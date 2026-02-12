@@ -9,21 +9,30 @@ class ObstacleManager {
 
     // Add obstacle from AI detection
     addDetectedObstacle(aiObject) {
-        // Convert distance (meters) to screen position
-        // Closer objects appear larger and lower on screen
-        const distanceMeters = aiObject.distance;
-        const y = this.distanceToY(distanceMeters);
+        // depth is relative 0–255 (higher = closer)
+        const depthValue = aiObject.distance || 0;
+        const y = this.distanceToY(depthValue);
 
         // Use bbox to determine x position (center of detection)
         const [bboxX, bboxY, bboxW, bboxH] = aiObject.bbox;
         const x = this.bboxToX(bboxX, bboxW);
 
-        // Get class info from config
-        const classInfo = CONFIG.cocoClasses[aiObject.class] || {
-            name: 'unknown',
-            color: '#FFFFFF',
-            size: 40
-        };
+        // Get class info from config (lookup by name since backend sends strings)
+        let classInfo = null;
+        for (const key in CONFIG.cocoClasses) {
+            if (CONFIG.cocoClasses[key].name === aiObject.class) {
+                classInfo = CONFIG.cocoClasses[key];
+                break;
+            }
+        }
+        if (!classInfo) {
+            classInfo = { name: aiObject.class || 'unknown', color: '#FFFFFF', size: 40 };
+        }
+
+        // Size proportional to bbox width (from 640px camera frame → canvas road)
+        const scaleFactor = CONFIG.road.width / 640;
+        const obsWidth  = Math.max(10, bboxW * scaleFactor);
+        const obsHeight = Math.max(10, bboxH * scaleFactor);
 
         const obstacle = {
             id: `ai_${aiObject.id}`,
@@ -31,10 +40,10 @@ class ObstacleManager {
             class: classInfo.name,
             x: x,
             y: y,
-            width: classInfo.size,
-            height: classInfo.size,
+            width: obsWidth,
+            height: obsHeight,
             color: classInfo.color,
-            distance: distanceMeters,
+            distance: depthValue,
             aiId: aiObject.id
         };
 
@@ -87,14 +96,17 @@ class ObstacleManager {
         this.obstacles.push(obstacle);
     }
 
-    // Update obstacle positions based on car movement
-    update(deltaTime, carVelocity) {
-        const roadScrollSpeed = carVelocity.y;
-
+    // Update obstacle positions based on world (RPi mouse) movement
+    update(deltaTime, worldSpeedPx, worldSteeringDeg) {
         this.obstacles.forEach(obstacle => {
-            // Move obstacles relative to car's velocity
-            obstacle.y += roadScrollSpeed * deltaTime;
-            obstacle.x -= carVelocity.x * deltaTime;
+            // Detected (AI) obstacles: positioned from MQTT data, don't move
+            if (obstacle.type !== 'detected') {
+                // Random/user obstacles scroll with the world
+                obstacle.y += worldSpeedPx * deltaTime;
+                // Lateral drift from world steering
+                const lateralPx = (worldSteeringDeg / CONFIG.physics.maxRotation) * 100;
+                obstacle.x -= lateralPx * deltaTime;
+            }
         });
 
         // Remove off-screen obstacles
@@ -143,16 +155,16 @@ class ObstacleManager {
             y1 + h1 > y2;
     }
 
-    // Convert distance in meters to Y position on screen
-    distanceToY(distanceMeters) {
-        // Closer = lower on screen (higher y value)
-        // Further = higher on screen (lower y value)
-        const maxDistance = 50; // meters
+    // Convert relative depth (0–255) to Y position on screen
+    // Higher depth value = closer = lower on screen (higher y)
+    distanceToY(depthValue) {
         const minY = 50;
-        const maxY = CONFIG.canvas.height - 100;
+        // Cap so depth=255 stays well above the car's default start position
+        const maxY = CONFIG.car.y - CONFIG.car.height - 10;
 
-        const normalizedDistance = Math.min(distanceMeters / maxDistance, 1);
-        return maxY - (normalizedDistance * (maxY - minY));
+        const normalized = Math.min(Math.max(depthValue / 255, 0), 1);
+        // 0 (far) → minY (top), 255 (close) → maxY (just above car)
+        return minY + normalized * (maxY - minY);
     }
 
     // Convert bbox x position to screen x

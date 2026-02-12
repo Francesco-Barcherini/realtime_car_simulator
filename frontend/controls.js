@@ -65,68 +65,37 @@ class Controls {
         };
     }
 
-    // Calculate velocity based on input (vector sum)
-    calculateVelocity(currentVelocity, deltaTime, mouseInput = null) {
+    // Calculate car motion from arrow keys (relative to reference point)
+    // Returns updated { carSpeed, carAngle }
+    calculateCarMotion(carSpeed, carAngle, deltaTime) {
         const input = this.getInput();
-        let velocity = { ...currentVelocity };
 
-        // Forward/backward acceleration (Y axis)
+        // Up/down change car speed (can go negative for reverse)
         if (input.gas) {
-            velocity.y += CONFIG.physics.acceleration * deltaTime;
+            carSpeed += CONFIG.physics.acceleration * deltaTime;
         } else if (input.brake) {
-            velocity.y -= CONFIG.physics.deceleration * deltaTime;
+            carSpeed -= CONFIG.physics.deceleration * deltaTime;
         } else {
-            // Apply friction when no input
-            if (velocity.y > 0) {
-                velocity.y = Math.max(0, velocity.y - CONFIG.physics.friction * deltaTime);
-            } else if (velocity.y < 0) {
-                velocity.y = Math.min(0, velocity.y + CONFIG.physics.friction * deltaTime);
+            // Friction towards 0
+            if (carSpeed > 0) {
+                carSpeed = Math.max(0, carSpeed - CONFIG.physics.friction * deltaTime);
+            } else if (carSpeed < 0) {
+                carSpeed = Math.min(0, carSpeed + CONFIG.physics.friction * deltaTime);
             }
         }
 
-        // Clamp forward speed
-        velocity.y = Math.max(-CONFIG.physics.maxSpeed / 2,
-            Math.min(CONFIG.physics.maxSpeed, velocity.y));
+        // Clamp speed (negative allowed for reverse)
+        carSpeed = Math.max(-CONFIG.physics.maxSpeed / 2,
+            Math.min(CONFIG.physics.maxSpeed, carSpeed));
 
-        // Lateral movement (X axis) - steering
-        let targetRotation = 0;
+        // Left/right change heading direction
         if (input.left) {
-            targetRotation = -CONFIG.physics.maxRotation;
-        } else if (input.right) {
-            targetRotation = CONFIG.physics.maxRotation;
+            carAngle -= CONFIG.physics.rotationSpeed * deltaTime;
+        }
+        if (input.right) {
+            carAngle += CONFIG.physics.rotationSpeed * deltaTime;
         }
 
-        // Apply mouse steering if available
-        if (mouseInput && mouseInput.steering !== undefined) {
-            targetRotation = mouseInput.steering;
-        }
-
-        // Convert rotation to lateral velocity
-        // More speed = more lateral movement when turning
-        const speedFactor = Math.abs(velocity.y) / CONFIG.physics.maxSpeed;
-        velocity.x = (targetRotation / CONFIG.physics.maxRotation) * 100 * speedFactor;
-
-        // Store current rotation for display
-        velocity.rotation = targetRotation;
-
-        // Apply mouse speed if available
-        if (mouseInput && mouseInput.speed !== undefined) {
-            // Mouse speed is normalized 0-1
-            velocity.y = mouseInput.speed * CONFIG.physics.maxSpeed;
-        }
-
-        return velocity;
-    }
-
-    // Get current steering angle for display
-    getSteeringAngle(velocity) {
-        return velocity.rotation || 0;
-    }
-
-    // Get current speed in km/h for display
-    getSpeed(velocity) {
-        // Convert pixels/sec to km/h (arbitrary conversion for display)
-        const pixelsPerSecond = Math.abs(velocity.y);
-        return Math.round(pixelsPerSecond * 0.36); // rough conversion
+        return { carSpeed, carAngle };
     }
 }

@@ -73,6 +73,9 @@
             gap: 16px;
             padding: 16px 24px;
         }
+        .panel.full-width {
+            grid-column: 1 / -1;
+        }
         .panel {
             background: #1a1a2e;
             border: 1px solid #2d2d44;
@@ -130,38 +133,32 @@
     <label>Video Source:</label>
     <select id="source-select">
         <option value="camera">📷 Camera</option>
-        <option value="file">🎞️ Video file</option>
+        <option value="file" selected>🎞️ Video file</option>
     </select>
-    <input id="file-path" type="text" placeholder="filename inside device/video/ (e.g. driving.mp4)" style="width:340px; display:none;">
+    <input id="file-path" type="text" placeholder="filename inside device/video/ (e.g. drive.mp4)" value="drive.mp4" style="width:340px;">
     <button id="apply-source">Apply</button>
 </div>
 
 <!-- ── panels ───────────────────────────────────────────── -->
 <div class="grid">
-    <!-- 1. Raw video stream -->
-    <div class="panel">
-        <div class="panel-title">Original Stream</div>
-        <img id="img-stream" alt="waiting for stream…">
-    </div>
-
-    <!-- 2. Annotated frame (bboxes) -->
+    <!-- 1. Annotated frame (bboxes) -->
     <div class="panel">
         <div class="panel-title">Detections (YOLO + Tracking)</div>
         <img id="img-annotated" alt="waiting for detections…">
     </div>
 
-    <!-- 3. Depth heatmap -->
+    <!-- 2. Depth heatmap -->
     <div class="panel">
         <div class="panel-title">Depth Heatmap (ViTS)</div>
         <img id="img-depth" alt="waiting for depth…">
     </div>
 
-    <!-- 4. Detected objects table -->
-    <div class="panel">
+    <!-- 3. Detected objects table -->
+    <div class="panel full-width">
         <div class="panel-title">Detected Objects</div>
         <div class="panel-body">
             <table>
-                <thead><tr><th>ID</th><th>Class</th><th>Distance</th><th>BBox</th></tr></thead>
+                <thead><tr><th>ID</th><th>Class</th><th>Depth (rel.)</th><th>BBox</th></tr></thead>
                 <tbody id="objects-tbody"></tbody>
             </table>
         </div>
@@ -174,7 +171,6 @@
 <script>
 (function () {
     // ── DOM refs ─────────────────────────────────────────────
-    const imgStream    = document.getElementById('img-stream');
     const imgAnnotated = document.getElementById('img-annotated');
     const imgDepth     = document.getElementById('img-depth');
     const objectsTbody = document.getElementById('objects-tbody');
@@ -186,10 +182,9 @@
     const filePathInput = document.getElementById('file-path');
     const applyBtn      = document.getElementById('apply-source');
 
-    // ── Device stream URL (same host, port 5000) ────────────
-    const DEVICE_HOST = window.location.hostname || 'localhost';
-    const DEVICE_PORT = 5000;
-    imgStream.src = 'http://' + DEVICE_HOST + ':' + DEVICE_PORT + '/video';
+    // ── Device base URL (RPi) ────────────────────────────────
+    const DEVICE_HOST = CONFIG.device.host;
+    const DEVICE_PORT = CONFIG.device.streamPort;
 
     // ── Source selector UI ──────────────────────────────────
     sourceSelect.addEventListener('change', () => {
@@ -208,14 +203,7 @@
         }
         fetch(url, { method: 'POST' })
             .then(r => r.json())
-            .then(d => {
-                console.log('Source switched:', d);
-                // force stream reload
-                imgStream.src = '';
-                setTimeout(() => {
-                    imgStream.src = base + '/video?' + Date.now();
-                }, 500);
-            })
+            .then(d => console.log('Source switched:', d))
             .catch(e => alert('Failed to switch source: ' + e));
     });
 
@@ -287,7 +275,7 @@
             return;
         }
         objectsTbody.innerHTML = objects.map(o => {
-            const dist = o.distance != null ? o.distance.toFixed(1) + ' m' : '–';
+            const dist = o.distance != null ? o.distance.toFixed(0) : '–';
             const bbox = o.bbox.map(v => Math.round(v)).join(', ');
             return '<tr><td>#' + o.id + '</td><td>' + o.class + '</td><td>' + dist + '</td><td>' + bbox + '</td></tr>';
         }).join('');

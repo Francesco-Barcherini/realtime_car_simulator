@@ -13,13 +13,15 @@ class Game {
             running: false,
             gameOver: false,
             score: 0,
-            velocity: { x: 0, y: 0, rotation: 0 },
-            carRotation: 0,
-            obstacles: [],
-            mouseInput: {
-                speed: null,
-                steering: null
-            }
+            // Car (arrow-key driven, relative to reference point)
+            carSpeed: 0,            // px/s, can be negative
+            carAngle: 0,            // degrees, 0 = straight up
+            carX: CONFIG.car.x,
+            carY: CONFIG.car.y,
+            // World (RPi mouse driven)
+            worldSpeed: 0,          // km/h from mouse/speed
+            worldSteering: 0,       // degrees from mouse/steering
+            obstacles: []
         };
 
         // Timing
@@ -78,18 +80,29 @@ class Game {
     update(deltaTime, currentTime) {
         if (this.state.gameOver) return;
 
-        // Update velocity based on controls and mouse input
-        this.state.velocity = this.controls.calculateVelocity(
-            this.state.velocity,
-            deltaTime,
-            this.state.mouseInput
+        // 1. Arrow keys → car speed & heading
+        const motion = this.controls.calculateCarMotion(
+            this.state.carSpeed, this.state.carAngle, deltaTime
         );
+        this.state.carSpeed = motion.carSpeed;
+        this.state.carAngle = motion.carAngle;
 
-        // Update car rotation for display
-        this.state.carRotation = this.state.velocity.rotation || 0;
+        // 2. Move car (direction from carAngle, magnitude from carSpeed)
+        const angleRad = this.state.carAngle * Math.PI / 180;
+        this.state.carX += this.state.carSpeed * Math.sin(angleRad) * deltaTime;
+        this.state.carY -= this.state.carSpeed * Math.cos(angleRad) * deltaTime;
 
-        // Update obstacles
-        this.obstacleManager.update(deltaTime, this.state.velocity);
+        // Clamp car to canvas
+        const hw = CONFIG.car.width / 2;
+        const hh = CONFIG.car.height / 2;
+        this.state.carX = Math.max(hw, Math.min(CONFIG.canvas.width - hw, this.state.carX));
+        this.state.carY = Math.max(hh, Math.min(CONFIG.canvas.height - hh, this.state.carY));
+
+        // 3. World scroll speed (km/h → px/s)
+        const worldSpeedPx = this.state.worldSpeed / 0.36;
+
+        // 4. Update obstacles (random/user scroll with world)
+        this.obstacleManager.update(deltaTime, worldSpeedPx, this.state.worldSteering);
 
         // Spawn random obstacles
         this.obstacleManager.spawnRandom(currentTime);
@@ -97,10 +110,10 @@ class Game {
         // Get all obstacles for rendering
         this.state.obstacles = this.obstacleManager.getAll();
 
-        // Check collisions
+        // 5. Check collisions at car's actual position
         const collision = this.obstacleManager.checkCollision(
-            CONFIG.car.x - CONFIG.car.width / 2,
-            CONFIG.car.y - CONFIG.car.height / 2,
+            this.state.carX - hw,
+            this.state.carY - hh,
             CONFIG.car.width,
             CONFIG.car.height
         );
@@ -109,9 +122,9 @@ class Game {
             this.handleCollision(collision);
         }
 
-        // Update score (based on distance traveled)
-        if (this.state.velocity.y > 0) {
-            this.state.score += Math.floor(this.state.velocity.y * deltaTime * 0.1);
+        // 6. Score (based on world distance)
+        if (this.state.worldSpeed > 0) {
+            this.state.score += Math.floor(this.state.worldSpeed * deltaTime * 0.1);
         }
 
         // Update UI
@@ -129,8 +142,8 @@ class Game {
 
     // Update UI elements
     updateUI() {
-        this.speedDisplay.textContent = this.controls.getSpeed(this.state.velocity);
-        this.steeringDisplay.textContent = Math.round(this.controls.getSteeringAngle(this.state.velocity));
+        this.speedDisplay.textContent = Math.round(this.state.worldSpeed);
+        this.steeringDisplay.textContent = Math.round(this.state.worldSteering);
         this.scoreDisplay.textContent = this.state.score;
         this.obstaclesDisplay.textContent = this.obstacleManager.count();
     }
@@ -139,13 +152,13 @@ class Game {
     handleMQTTMessage(type, data) {
         switch (type) {
             case 'mouseSpeed':
-                // Update mouse speed input
-                this.state.mouseInput.speed = data.speed;
+                // World scroll speed (km/h from RPi mouse)
+                this.state.worldSpeed = data.speed;
                 break;
 
             case 'mouseSteering':
-                // Update mouse steering input
-                this.state.mouseInput.steering = data.angle;
+                // World lateral drift (degrees from RPi mouse)
+                this.state.worldSteering = data.angle;
                 break;
 
             case 'mouseObstacle':
@@ -192,13 +205,13 @@ class Game {
             running: true,
             gameOver: false,
             score: 0,
-            velocity: { x: 0, y: 0, rotation: 0 },
-            carRotation: 0,
-            obstacles: [],
-            mouseInput: {
-                speed: null,
-                steering: null
-            }
+            carSpeed: 0,
+            carAngle: 0,
+            carX: CONFIG.car.x,
+            carY: CONFIG.car.y,
+            worldSpeed: 0,
+            worldSteering: 0,
+            obstacles: []
         };
 
         // Clear obstacles

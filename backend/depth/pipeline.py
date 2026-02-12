@@ -10,6 +10,7 @@ frontend debug page.
 import time
 import json
 import base64
+import threading
 import cv2
 import numpy as np
 import paho.mqtt.client as mqtt
@@ -17,11 +18,16 @@ import paho.mqtt.client as mqtt
 from .detector import ObjectDetector
 from .depth_estimator import DepthEstimator
 
-# Colors for bounding boxes per class
+# Colors for bounding boxes per class (BGR)
 _CLASS_COLORS = {
-    "person": (71, 107, 255),     # red-ish (BGR)
-    "car": (209, 183, 69),        # blue-ish
-    "motorcycle": (122, 160, 255),# orange-ish
+    "person":        (107, 107, 255),   # red-ish
+    "bicycle":       (196, 205, 78),    # teal
+    "car":           (209, 183, 69),    # blue-ish
+    "motorcycle":    (122, 160, 255),   # orange-ish
+    "bus":           (200, 216, 152),   # green-ish
+    "truck":         (231, 92, 108),    # purple-ish
+    "traffic light": (110, 203, 253),   # yellow-ish
+    "stop sign":     (85, 112, 225),    # salmon
 }
 
 
@@ -38,12 +44,19 @@ def _annotate_frame(frame: np.ndarray, detections: list) -> np.ndarray:
         color = _CLASS_COLORS.get(det["class"], (0, 255, 0))
         cv2.rectangle(vis, (x1, y1), (x2, y2), color, 2)
 
-        dist_str = f'{det["distance"]:.1f}m' if det.get("distance") is not None else "?"
-        label = f'{det["class"]} #{det["id"]} {dist_str}'
+        dist_str = f'{det["distance"]:.1f}' if det.get("distance") is not None else "?"
+        label = f'{det["class"]} #{det["id"]} d:{dist_str}'
         (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-        cv2.rectangle(vis, (x1, y1 - th - 6), (x1 + tw + 4, y1), color, -1)
-        cv2.putText(vis, label, (x1 + 2, y1 - 4),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+        # Place label inside the bbox when it would go above the image
+        if y1 - th - 6 < 0:
+            cv2.rectangle(vis, (x1, y1), (x1 + tw + 4, y1 + th + 6), color, -1)
+            cv2.putText(vis, label, (x1 + 2, y1 + th + 2),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        else:
+            cv2.rectangle(vis, (x1, y1 - th - 6), (x1 + tw + 4, y1), color, -1)
+            cv2.putText(vis, label, (x1 + 2, y1 - 4),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     return vis
 
 
@@ -60,6 +73,46 @@ def _encode_jpeg_b64(image: np.ndarray, quality: int = 60) -> str:
     """Encode a BGR image to a base64 JPEG string."""
     _, buf = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
     return base64.b64encode(buf.tobytes()).decode("ascii")
+
+
+class _FrameGrabber:
+    """Continuously reads frames in a background thread, always providing
+    the most recent one.  This avoids OpenCV buffer lag on MJPEG streams."""
+
+    def __init__(self, url: str):
+        self.url = url
+        self._cap = cv2.VideoCapture(url)
+        self._lock = threading.Lock()
+        self._frame = None
+        self._ret = False
+        self._running = True
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def _loop(self):
+        while self._running:
+            ret, frame = self._cap.read()
+            if not ret:
+                time.sleep(0.1)
+                continue
+            with self._lock:
+                self._ret = ret
+                self._frame = frame
+
+    def is_opened(self) -> bool:
+        return self._cap.isOpened()
+
+    def get_latest(self):
+        """Return (True, frame) for the most recent frame, or (False, None)."""
+        with self._lock:
+            if self._frame is not None:
+                return self._ret, self._frame.copy()
+            return False, None
+
+    def stop(self):
+        self._running = False
+        if self._cap is not None:
+            self._cap.release()
 
 
 class VisionPipeline:
@@ -96,15 +149,15 @@ class VisionPipeline:
 
         # Wait for the camera stream to become available
         print(f"[pipeline] Waiting for stream: {self.stream_url}")
-        cap = cv2.VideoCapture(self.stream_url)
-        while not cap.isOpened() and self._running:
+        grabber = _FrameGrabber(self.stream_url)
+        while not grabber.is_opened() and self._running:
             print("[pipeline] Stream not available – retrying in 3 s…")
-            cap.release()
+            grabber.stop()
             time.sleep(3)
-            cap = cv2.VideoCapture(self.stream_url)
+            grabber = _FrameGrabber(self.stream_url)
 
         if not self._running:
-            cap.release()
+            grabber.stop()
             return
 
         print(f"[pipeline] Connected to stream: {self.stream_url}")
@@ -118,12 +171,9 @@ class VisionPipeline:
 
         try:
             while self._running:
-                ret, frame = cap.read()
-                if not ret:
-                    print("[pipeline] Stream read failed – retrying …")
-                    time.sleep(0.5)
-                    cap.release()
-                    cap = cv2.VideoCapture(self.stream_url)
+                ret, frame = grabber.get_latest()
+                if not ret or frame is None:
+                    time.sleep(0.05)
                     continue
 
                 t_start = time.time()
@@ -133,16 +183,15 @@ class VisionPipeline:
                 detections = self.detector.track(frame)
                 dt_yolo = time.time() - t_yolo
 
-                # ── 2. Depth estimation (one map per frame) ──────
+                # ── 2. Depth estimation (skip when no detections) ─
                 dt_depth = 0.0
-                t_depth = time.time()
-                self.estimator.compute_depth_map(frame)
-
                 if detections:
+                    t_depth = time.time()
+                    self.estimator.compute_depth_map(frame)
                     for det in detections:
                         depth = self.estimator.get_depth_for_bbox(det["bbox"])
                         det["distance"] = round(depth, 2) if depth is not None else None
-                dt_depth = time.time() - t_depth
+                    dt_depth = time.time() - t_depth
 
                 # ── 3. Publish detections via MQTT ───────────────
                 payload = json.dumps(detections)
@@ -191,7 +240,7 @@ class VisionPipeline:
         except KeyboardInterrupt:
             pass
         finally:
-            cap.release()
+            grabber.stop()
             print("[pipeline] Stopped.")
 
     def stop(self):
