@@ -6,7 +6,7 @@ Supports two sources that can be switched at runtime via HTTP:
   GET /video          → MJPEG stream (current source)
   GET /source         → JSON with the active source info
   POST /source/camera → switch to live camera
-  POST /source/file?path=video/driving.mp4 → switch to a video file (loops)
+  POST /source/file?path=video/drive.mp4 → switch to a video file (loops)
 """
 
 import os
@@ -31,7 +31,7 @@ class CameraCapture:
     """Grabs JPEG frames from a camera or a video file.
     The source can be changed at runtime with switch_*() methods."""
 
-    def __init__(self, camera_index: int = 0):
+    def __init__(self, camera_index: int = 0, default_file: Optional[str] = None):
         self._lock = threading.Lock()
         self._frame: bytes = b""
         self._camera_index = camera_index
@@ -42,7 +42,16 @@ class CameraCapture:
         self._cap: Optional[cv2.VideoCapture] = None
         self._is_file = False
 
-        self._open_camera(camera_index)
+        # Start with a video file if provided and it exists
+        if default_file and os.path.isfile(default_file):
+            self._open_file(default_file)
+            self._source_label = "file"
+            self._source_detail = default_file
+            print(f"[camera_stream] Starting with file: {default_file}")
+        else:
+            self._open_camera(camera_index)
+            if default_file:
+                print(f"[camera_stream] File not found ({default_file}), falling back to camera")
 
         self._running = True
         threading.Thread(target=self._capture_loop, daemon=True).start()
@@ -207,7 +216,8 @@ class StreamHandler(BaseHTTPRequestHandler):
 def start_camera_stream(host: str = "0.0.0.0", port: int = 5000):
     """Start the HTTP server (blocking)."""
     global _camera
-    _camera = CameraCapture()
+    default_video = os.path.join(VIDEO_DIR, "drive.mp4")
+    _camera = CameraCapture(default_file=default_video)
     server = HTTPServer((host, port), StreamHandler)
     print(f"[camera_stream] Streaming on http://{host}:{port}/video")
     print(f"[camera_stream] Switch source via POST /source/camera or /source/file?path=...")
