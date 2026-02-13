@@ -124,7 +124,8 @@
     <h1>🔍 Debug View</h1>
     <div class="status-bar">
         <span><span id="mqtt-dot" class="status-dot off"></span>MQTT: <span id="mqtt-label">Disconnected</span></span>
-        <span>FPS: <span id="fps-label">–</span></span>
+        <span>Stream: <span id="fps-label">–</span> fps</span>
+        <span>AI: <span id="ai-fps-label">–</span> fps</span>
     </div>
 </header>
 
@@ -177,6 +178,7 @@
     const mqttDot      = document.getElementById('mqtt-dot');
     const mqttLabel    = document.getElementById('mqtt-label');
     const fpsLabel     = document.getElementById('fps-label');
+    const aiFpsLabel   = document.getElementById('ai-fps-label');
 
     const sourceSelect = document.getElementById('source-select');
     const filePathInput = document.getElementById('file-path');
@@ -207,7 +209,7 @@
             .catch(e => alert('Failed to switch source: ' + e));
     });
 
-    // ── FPS counter ─────────────────────────────────────────
+    // ── FPS counters ─────────────────────────────────────────
     let frameCount = 0;
     let lastFpsTime = performance.now();
     function tickFps() {
@@ -217,6 +219,18 @@
             fpsLabel.textContent = frameCount;
             frameCount = 0;
             lastFpsTime = now;
+        }
+    }
+
+    let aiFrameCount = 0;
+    let lastAiFpsTime = performance.now();
+    function tickAiFps() {
+        aiFrameCount++;
+        const now = performance.now();
+        if (now - lastAiFpsTime >= 1000) {
+            aiFpsLabel.textContent = aiFrameCount;
+            aiFrameCount = 0;
+            lastAiFpsTime = now;
         }
     }
 
@@ -244,6 +258,7 @@
 
             if (topic === CONFIG.mqtt.topics.aiObjects) {
                 renderObjects(Array.isArray(data) ? data : []);
+                tickAiFps();
             }
         } catch (e) {
             console.error('parse error:', e);

@@ -3,8 +3,14 @@
 Vision Pipeline – orchestrates video capture → YOLO detection → depth
 estimation and publishes results via MQTT.
 
-Also publishes debug frames (annotated + depth heatmap) for the
-frontend debug page.
+Architecture (decoupled):
+  • _FrameGrabber    – background thread, reads MJPEG at stream FPS,
+                       always holds the latest frame.
+  • AI thread        – grabs latest frame, runs YOLO + ViTS (~15 FPS),
+                       stores detections + depth heatmap in shared state.
+  • Debug publisher  – runs at ~30 FPS, grabs latest frame, overlays
+                       the *last known* bboxes persistently, publishes
+                       annotated + heatmap on ai/debug.
 """
 
 import time
@@ -29,6 +35,9 @@ _CLASS_COLORS = {
     "traffic light": (110, 203, 253),   # yellow-ish
     "stop sign":     (85, 112, 225),    # salmon
 }
+
+# ── Target debug FPS (how often we publish annotated frames) ─────
+_DEBUG_FPS = 30
 
 
 def _annotate_frame(frame: np.ndarray, detections: list) -> np.ndarray:
@@ -117,11 +126,9 @@ class _FrameGrabber:
 
 class VisionPipeline:
     """
-    End-to-end pipeline:
-      1. Pull MJPEG frames from the RPi camera stream.
-      2. Run YOLO object tracking (person, car, motorcycle).
-      3. Compute depth for each tracked object.
-      4. Publish results on MQTT topic 'ai/objects'.
+    Decoupled pipeline:
+      • AI thread    – YOLO + ViTS at model speed (~15 FPS).
+      • Debug thread – overlays persistent bboxes at stream FPS (~30 FPS).
     """
 
     def __init__(
@@ -142,106 +149,164 @@ class VisionPipeline:
         self.estimator = DepthEstimator(model_name=depth_model, device=device)
 
         self._running = False
+        self._grabber = None
 
+        # ── shared state between AI thread and debug thread ──────
+        self._state_lock = threading.Lock()
+        self._last_detections: list = []       # latest detections with distance
+        self._last_depth_map = None            # latest depth map (np.ndarray)
+
+    # ────────────────────────────────────────────────────────────
+    #  Public API
+    # ────────────────────────────────────────────────────────────
     def start(self):
-        """Open the video stream and process frames until stopped."""
+        """Open the video stream and launch AI + debug threads."""
         self._running = True
 
         # Wait for the camera stream to become available
         print(f"[pipeline] Waiting for stream: {self.stream_url}")
-        grabber = _FrameGrabber(self.stream_url)
-        while not grabber.is_opened() and self._running:
+        self._grabber = _FrameGrabber(self.stream_url)
+        while not self._grabber.is_opened() and self._running:
             print("[pipeline] Stream not available – retrying in 3 s…")
-            grabber.stop()
+            self._grabber.stop()
             time.sleep(3)
-            grabber = _FrameGrabber(self.stream_url)
+            self._grabber = _FrameGrabber(self.stream_url)
 
         if not self._running:
-            grabber.stop()
+            self._grabber.stop()
             return
 
         print(f"[pipeline] Connected to stream: {self.stream_url}")
-        frame_count = 0
 
-        # ── rolling FPS accumulators ─────────────────────────────
-        LOG_INTERVAL = 30  # log every N frames
-        acc_yolo = 0.0     # accumulated YOLO time
-        acc_depth = 0.0    # accumulated ViTS depth time
-        acc_total = 0.0    # accumulated total pipeline time
+        # Launch both threads
+        ai_thread = threading.Thread(target=self._ai_loop, daemon=True,
+                                     name="pipeline-ai")
+        debug_thread = threading.Thread(target=self._debug_loop, daemon=True,
+                                        name="pipeline-debug")
+        ai_thread.start()
+        debug_thread.start()
 
+        # Block until stopped
         try:
             while self._running:
-                ret, frame = grabber.get_latest()
-                if not ret or frame is None:
-                    time.sleep(0.05)
-                    continue
-
-                t_start = time.time()
-
-                # ── 1. YOLO detection + tracking ─────────────────
-                t_yolo = time.time()
-                detections = self.detector.track(frame)
-                dt_yolo = time.time() - t_yolo
-
-                # ── 2. Depth estimation (skip when no detections) ─
-                dt_depth = 0.0
-                if detections:
-                    t_depth = time.time()
-                    self.estimator.compute_depth_map(frame)
-                    for det in detections:
-                        depth = self.estimator.get_depth_for_bbox(det["bbox"])
-                        det["distance"] = round(depth, 2) if depth is not None else None
-                    dt_depth = time.time() - t_depth
-
-                # ── 3. Publish detections via MQTT ───────────────
-                payload = json.dumps(detections)
-                self.mqtt.publish("ai/objects", payload)
-
-                # ── 4. Publish debug frames ──────────────────────
-                annotated = _annotate_frame(frame, detections)
-                heatmap = _depth_to_heatmap(self.estimator._depth_map)
-
-                debug_payload = json.dumps({
-                    "annotated": _encode_jpeg_b64(annotated),
-                    "depth": _encode_jpeg_b64(heatmap),
-                })
-                self.mqtt.publish("ai/debug", debug_payload)
-
-                dt_total = time.time() - t_start
-                frame_count += 1
-
-                # ── accumulate for rolling average ───────────────
-                acc_yolo += dt_yolo
-                acc_depth += dt_depth
-                acc_total += dt_total
-
-                if frame_count % LOG_INTERVAL == 0:
-                    avg_yolo = acc_yolo / LOG_INTERVAL
-                    avg_depth = acc_depth / LOG_INTERVAL
-                    avg_total = acc_total / LOG_INTERVAL
-
-                    fps_yolo = 1.0 / avg_yolo if avg_yolo > 0 else float("inf")
-                    fps_depth = 1.0 / avg_depth if avg_depth > 0 else float("inf")
-                    fps_total = 1.0 / avg_total if avg_total > 0 else float("inf")
-
-                    n = len(detections)
-                    print(
-                        f"[pipeline] frame {frame_count}  objects={n}  |  "
-                        f"YOLO {fps_yolo:5.1f} fps ({avg_yolo*1000:.0f} ms)  |  "
-                        f"ViTS {fps_depth:5.1f} fps ({avg_depth*1000:.0f} ms)  |  "
-                        f"Total {fps_total:5.1f} fps ({avg_total*1000:.0f} ms)"
-                    )
-
-                    # reset accumulators
-                    acc_yolo = 0.0
-                    acc_depth = 0.0
-                    acc_total = 0.0
-
+                time.sleep(0.5)
         except KeyboardInterrupt:
             pass
         finally:
-            grabber.stop()
+            self._running = False
+            ai_thread.join(timeout=5)
+            debug_thread.join(timeout=5)
+            self._grabber.stop()
             print("[pipeline] Stopped.")
 
     def stop(self):
         self._running = False
+
+    # ────────────────────────────────────────────────────────────
+    #  AI loop  (runs at model speed, ~15 FPS)
+    # ────────────────────────────────────────────────────────────
+    def _ai_loop(self):
+        frame_count = 0
+        LOG_INTERVAL = 30
+        acc_yolo = 0.0
+        acc_depth = 0.0
+        acc_total = 0.0
+
+        while self._running:
+            ret, frame = self._grabber.get_latest()
+            if not ret or frame is None:
+                time.sleep(0.05)
+                continue
+
+            t_start = time.time()
+
+            # ── 1. YOLO detection + tracking ─────────────────
+            t_yolo = time.time()
+            detections = self.detector.track(frame)
+            dt_yolo = time.time() - t_yolo
+
+            # ── 2. Depth estimation (skip when no detections) ─
+            dt_depth = 0.0
+            if detections:
+                t_depth = time.time()
+                self.estimator.compute_depth_map(frame)
+                for det in detections:
+                    depth = self.estimator.get_depth_for_bbox(det["bbox"])
+                    det["distance"] = round(depth, 2) if depth is not None else None
+                dt_depth = time.time() - t_depth
+
+            # ── 3. Store shared state ────────────────────────
+            with self._state_lock:
+                self._last_detections = detections
+                self._last_depth_map = (
+                    self.estimator._depth_map.copy()
+                    if self.estimator._depth_map is not None else None
+                )
+
+            # ── 4. Publish detections via MQTT ───────────────
+            payload = json.dumps(detections)
+            self.mqtt.publish("ai/objects", payload)
+
+            dt_total = time.time() - t_start
+            frame_count += 1
+
+            # ── rolling average logging ──────────────────────
+            acc_yolo += dt_yolo
+            acc_depth += dt_depth
+            acc_total += dt_total
+
+            if frame_count % LOG_INTERVAL == 0:
+                avg_yolo = acc_yolo / LOG_INTERVAL
+                avg_depth = acc_depth / LOG_INTERVAL
+                avg_total = acc_total / LOG_INTERVAL
+
+                fps_yolo = 1.0 / avg_yolo if avg_yolo > 0 else float("inf")
+                fps_depth = 1.0 / avg_depth if avg_depth > 0 else float("inf")
+                fps_total = 1.0 / avg_total if avg_total > 0 else float("inf")
+
+                n = len(detections)
+                print(
+                    f"[ai] frame {frame_count}  objects={n}  |  "
+                    f"YOLO {fps_yolo:5.1f} fps ({avg_yolo*1000:.0f} ms)  |  "
+                    f"ViTS {fps_depth:5.1f} fps ({avg_depth*1000:.0f} ms)  |  "
+                    f"Total {fps_total:5.1f} fps ({avg_total*1000:.0f} ms)"
+                )
+                acc_yolo = acc_depth = acc_total = 0.0
+
+    # ────────────────────────────────────────────────────────────
+    #  Debug loop  (runs at _DEBUG_FPS, overlays persistent bboxes)
+    # ────────────────────────────────────────────────────────────
+    def _debug_loop(self):
+        interval = 1.0 / _DEBUG_FPS
+        frame_count = 0
+
+        while self._running:
+            t0 = time.time()
+
+            ret, frame = self._grabber.get_latest()
+            if not ret or frame is None:
+                time.sleep(0.05)
+                continue
+
+            # Read the latest AI results (lock-free snapshot)
+            with self._state_lock:
+                detections = self._last_detections
+                depth_map = self._last_depth_map
+
+            # Annotate every frame with the *persistent* last-known bboxes
+            annotated = _annotate_frame(frame, detections)
+            heatmap = _depth_to_heatmap(depth_map)
+
+            debug_payload = json.dumps({
+                "annotated": _encode_jpeg_b64(annotated),
+                "depth": _encode_jpeg_b64(heatmap),
+            })
+            self.mqtt.publish("ai/debug", debug_payload)
+
+            frame_count += 1
+
+            # Pace to target FPS
+            elapsed = time.time() - t0
+            remaining = interval - elapsed
+            if remaining > 0:
+                time.sleep(remaining)
