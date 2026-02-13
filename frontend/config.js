@@ -4,7 +4,7 @@ const CONFIG = {
     // MQTT Configuration
     // broker runs on the backend PC (same machine as Mosquitto)
     mqtt: {
-        broker: window.location.hostname || 'localhost',
+        broker: '10.30.7.22' || window.location.hostname || 'localhost',
         port: 9001, // WebSocket port (default for MQTT over WebSocket)
         clientId: 'car_simulator_' + Math.random().toString(16).substr(2, 8),
         topics: {

@@ -23,7 +23,7 @@ def on_connect(client, userdata, flags, rc):
 
 def main():
     parser = argparse.ArgumentParser(description="RPi device controller")
-    parser.add_argument("--broker", default="10.30.7.42",
+    parser.add_argument("--broker", default="10.30.7.22",
                         help="MQTT broker IP (default from conf.conf)")
     parser.add_argument("--mqtt-port", type=int, default=1883,
                         help="MQTT broker port")
