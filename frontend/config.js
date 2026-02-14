@@ -36,7 +36,7 @@ const CONFIG = {
     canvas: {
         width: 800,
         height: 600,
-        fps: 60
+        fps: 30
     },
 
     // Road

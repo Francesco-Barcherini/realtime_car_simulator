@@ -22,7 +22,7 @@ import cv2
 # ── defaults ─────────────────────────────────────────────────────
 STREAM_WIDTH = 640
 STREAM_HEIGHT = 480
-STREAM_FPS = 15
+STREAM_FPS = 30
 JPEG_QUALITY = 70
 VIDEO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "video")
 
@@ -35,6 +35,7 @@ class CameraCapture:
         self._lock = threading.Lock()
         self._frame: bytes = b""
         self._camera_index = camera_index
+        self._target_fps = STREAM_FPS
 
         # source bookkeeping
         self._source_label = "camera"
@@ -83,10 +84,19 @@ class CameraCapture:
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, STREAM_WIDTH)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, STREAM_HEIGHT)
         self._is_file = False
+        self._target_fps = STREAM_FPS
 
     def _open_file(self, filepath: str):
         self._cap = cv2.VideoCapture(filepath)
         self._is_file = True
+        # Use the video's native FPS for correct playback speed
+        native_fps = self._cap.get(cv2.CAP_PROP_FPS)
+        if native_fps > 0:
+            self._target_fps = native_fps
+            print(f"[camera_stream] File native FPS: {native_fps:.2f}")
+        else:
+            self._target_fps = STREAM_FPS
+            print(f"[camera_stream] Could not detect file FPS, using {STREAM_FPS}")
 
     def _release_cap(self):
         if self._cap is not None:
@@ -96,9 +106,12 @@ class CameraCapture:
     # ── capture loop ─────────────────────────────────────────────
     def _capture_loop(self):
         while self._running:
+            t0 = time.monotonic()
+
             with self._lock:
                 cap = self._cap
                 is_file = self._is_file
+                target_fps = self._target_fps
 
             if cap is None or not cap.isOpened():
                 time.sleep(0.1)
@@ -116,7 +129,15 @@ class CameraCapture:
                 time.sleep(0.01)
                 continue
 
-            frame = cv2.resize(frame, (STREAM_WIDTH, STREAM_HEIGHT))
+            # For files: resize from 1280×720 → stream size
+            # For camera: already set via CAP_PROP but resize to be safe
+            if is_file:
+                frame = cv2.resize(frame, (STREAM_WIDTH, STREAM_HEIGHT),
+                                   interpolation=cv2.INTER_LINEAR)
+            else:
+                if frame.shape[1] != STREAM_WIDTH or frame.shape[0] != STREAM_HEIGHT:
+                    frame = cv2.resize(frame, (STREAM_WIDTH, STREAM_HEIGHT))
+
             _, jpeg = cv2.imencode(
                 ".jpg", frame,
                 [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY],
@@ -124,7 +145,12 @@ class CameraCapture:
             with self._lock:
                 self._frame = jpeg.tobytes()
 
-            time.sleep(1.0 / STREAM_FPS)
+            # Sleep only the REMAINING time to hit target FPS
+            elapsed = time.monotonic() - t0
+            target_interval = 1.0 / target_fps
+            remaining = target_interval - elapsed
+            if remaining > 0:
+                time.sleep(remaining)
 
     def get_frame(self) -> bytes:
         with self._lock:

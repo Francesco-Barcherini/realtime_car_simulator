@@ -101,7 +101,7 @@ def main():
 
     while True:
         try:
-            mqtt_client.connect("localhost", args.mqtt_port, keepalive=60)
+            mqtt_client.connect("127.0.0.1", args.mqtt_port, keepalive=60)
             break
         except (ConnectionRefusedError, OSError) as e:
             print(f"[backend] MQTT broker not reachable ({e}) – retrying in 3 s…")
