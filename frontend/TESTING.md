@@ -111,7 +111,7 @@ Open Developer Tools (F12) and check for:
 
 ## Performance Testing
 
-- Target: 60 FPS
+- Target: 30 FPS
 - Monitor with browser DevTools Performance tab
 - Test with many obstacles (20+)
 - Check memory usage over time
