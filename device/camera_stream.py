@@ -20,8 +20,7 @@ from typing import Optional
 import cv2
 
 # ── defaults ─────────────────────────────────────────────────────
-STREAM_WIDTH = 640
-STREAM_HEIGHT = 480
+
 STREAM_FPS = 30
 JPEG_QUALITY = 70
 VIDEO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "video")
@@ -81,8 +80,6 @@ class CameraCapture:
     # ── internal helpers ─────────────────────────────────────────
     def _open_camera(self, index: int):
         self._cap = cv2.VideoCapture(index)
-        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, STREAM_WIDTH)
-        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, STREAM_HEIGHT)
         self._is_file = False
         self._target_fps = STREAM_FPS
 
@@ -128,15 +125,6 @@ class CameraCapture:
             if not ret:
                 time.sleep(0.01)
                 continue
-
-            # For files: resize from 1280×720 → stream size
-            # For camera: already set via CAP_PROP but resize to be safe
-            if is_file:
-                frame = cv2.resize(frame, (STREAM_WIDTH, STREAM_HEIGHT),
-                                   interpolation=cv2.INTER_LINEAR)
-            else:
-                if frame.shape[1] != STREAM_WIDTH or frame.shape[0] != STREAM_HEIGHT:
-                    frame = cv2.resize(frame, (STREAM_WIDTH, STREAM_HEIGHT))
 
             _, jpeg = cv2.imencode(
                 ".jpg", frame,
