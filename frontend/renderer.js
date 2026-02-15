@@ -14,7 +14,8 @@ class Renderer {
     render(gameState) {
         this.clear();
         const worldSpeedPx = (gameState.worldSpeed || 0) / 0.36;
-        this.drawRoad(worldSpeedPx);
+        const steeringDeg = gameState.worldSteering || 0;
+        this.drawRoad(worldSpeedPx, steeringDeg);
         this.drawObstacles(gameState.obstacles);
         this.drawCar(gameState.carX, gameState.carY, gameState.carAngle);
     }
@@ -25,50 +26,158 @@ class Renderer {
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     }
 
-    // Draw scrolling road
-    drawRoad(scrollSpeed) {
-        const roadLeft = (CONFIG.canvas.width - CONFIG.road.width) / 2;
-        const roadRight = roadLeft + CONFIG.road.width;
+    // Draw road with curved lines above refY, straight below refY
+    drawRoad(scrollSpeed, steeringDeg) {
+        const W = this.canvas.width;
+        const H = this.canvas.height;
+        const halfRoad = CONFIG.road.width / 2;
+        const centreX = W / 2;
+        const roadLeft = centreX - halfRoad;
+        const roadRight = centreX + halfRoad;
+        const refY = CONFIG.referencePoint.y;
 
-        // Road background
-        this.ctx.fillStyle = CONFIG.colors.road;
-        this.ctx.fillRect(roadLeft, 0, CONFIG.road.width, CONFIG.canvas.height);
+        // Scrolling offset (positive speed → dashes move downward)
+        this.roadOffset -= scrollSpeed * 0.016;
+        this.roadOffset = ((this.roadOffset % 60) + 60) % 60;
 
-        // Road edges
-        this.ctx.strokeStyle = '#FFFFFF';
-        this.ctx.lineWidth = 3;
-        this.ctx.beginPath();
-        this.ctx.moveTo(roadLeft, 0);
-        this.ctx.lineTo(roadLeft, CONFIG.canvas.height);
-        this.ctx.moveTo(roadRight, 0);
-        this.ctx.lineTo(roadRight, CONFIG.canvas.height);
-        this.ctx.stroke();
+        const absTheta = Math.abs(steeringDeg);
 
-        // Lane dividers (scrolling dashed lines)
-        this.roadOffset -= scrollSpeed * 0.016; // negative so dashes move top→bottom
-        this.roadOffset = ((this.roadOffset % 60) + 60) % 60; // wrap both directions
+        if (absTheta < 0.5) {
+            // ── straight road ────────────────────────────────────
+            // Road background
+            this.ctx.fillStyle = CONFIG.colors.road;
+            this.ctx.fillRect(roadLeft, 0, CONFIG.road.width, H);
 
-        this.ctx.strokeStyle = CONFIG.colors.roadLine;
-        this.ctx.lineWidth = 3;
-        this.ctx.setLineDash([30, 30]);
-
-        const laneWidth = CONFIG.road.width / CONFIG.road.laneCount;
-        for (let i = 1; i < CONFIG.road.laneCount; i++) {
-            const x = roadLeft + (laneWidth * i);
+            // Edges
+            this.ctx.strokeStyle = '#FFFFFF';
+            this.ctx.lineWidth = 3;
             this.ctx.beginPath();
-            this.ctx.moveTo(x, -this.roadOffset);
-            this.ctx.lineTo(x, CONFIG.canvas.height);
+            this.ctx.moveTo(roadLeft, 0);
+            this.ctx.lineTo(roadLeft, H);
+            this.ctx.moveTo(roadRight, 0);
+            this.ctx.lineTo(roadRight, H);
             this.ctx.stroke();
-        }
 
-        this.ctx.setLineDash([]); // Reset dash
+            // Dashed centre
+            this.ctx.strokeStyle = CONFIG.colors.roadLine;
+            this.ctx.lineWidth = 3;
+            this.ctx.setLineDash([30, 30]);
+            this.ctx.lineDashOffset = this.roadOffset;
+            this.ctx.beginPath();
+            this.ctx.moveTo(centreX, 0);
+            this.ctx.lineTo(centreX, H);
+            this.ctx.stroke();
+            this.ctx.setLineDash([]);
+            this.ctx.lineDashOffset = 0;
+        } else {
+            // ── curved road (above refY) + straight (below refY) ─
+            const thetaRad = absTheta * Math.PI / 180;
+            const d = H / Math.sin(thetaRad); // centre-line radius
+
+            // Circle centre sits at refY, offset left or right
+            // steering > 0 (car turns right) → circle centre to the RIGHT
+            // steering < 0 (car turns left)  → circle centre to the LEFT
+            const cx = steeringDeg > 0 ? centreX + d : centreX - d;
+            const cy = refY;
+
+            const k = halfRoad; // half road width
+
+            // Inner edge radius (closer to circle centre) and outer
+            const rInner = d - k;
+            const rOuter = d + k;
+
+            // Angle where the centre arc meets (centreX, refY)
+            const refAngle = Math.atan2(refY - cy, centreX - cx);
+            // We need enough sweep to cover the full canvas width at y=0
+            const sweep = Math.PI * 0.6;
+
+            // Determine arc direction so it sweeps UPWARD on screen:
+            //  steering > 0 → cx to the right → refAngle = π
+            //     upward = increasing angle (π → 3π/2) → anticlockwise = false
+            //  steering < 0 → cx to the left  → refAngle = 0
+            //     upward = decreasing angle (0 → −π/2) → anticlockwise = true
+            let arcStart, arcEnd, ccw;
+            if (steeringDeg > 0) {
+                arcStart = refAngle;
+                arcEnd = refAngle + sweep;
+                ccw = false;
+            } else {
+                arcStart = refAngle;
+                arcEnd = refAngle - sweep;
+                ccw = true;
+            }
+
+            // ── BELOW refY: straight background + lines ──────────
+            this.ctx.fillStyle = CONFIG.colors.road;
+            this.ctx.fillRect(roadLeft, refY, CONFIG.road.width, H - refY);
+
+            this.ctx.strokeStyle = '#FFFFFF';
+            this.ctx.lineWidth = 3;
+            this.ctx.beginPath();
+            this.ctx.moveTo(roadLeft, refY);
+            this.ctx.lineTo(roadLeft, H);
+            this.ctx.moveTo(roadRight, refY);
+            this.ctx.lineTo(roadRight, H);
+            this.ctx.stroke();
+
+            this.ctx.strokeStyle = CONFIG.colors.roadLine;
+            this.ctx.lineWidth = 3;
+            this.ctx.setLineDash([30, 30]);
+            this.ctx.lineDashOffset = this.roadOffset;
+            this.ctx.beginPath();
+            this.ctx.moveTo(centreX, refY);
+            this.ctx.lineTo(centreX, H);
+            this.ctx.stroke();
+            this.ctx.setLineDash([]);
+            this.ctx.lineDashOffset = 0;
+
+            // ── ABOVE refY: curved background + lines ────────────
+            // Clip to above-refY
+            this.ctx.save();
+            this.ctx.beginPath();
+            this.ctx.rect(0, 0, W, refY);
+            this.ctx.clip();
+
+            // Fill the curved road band (annular sector between rInner and rOuter)
+            this.ctx.fillStyle = CONFIG.colors.road;
+            this.ctx.beginPath();
+            // Outer arc in one direction
+            this.ctx.arc(cx, cy, rOuter, arcStart, arcEnd, ccw);
+            // Inner arc back in the opposite direction to close the shape
+            this.ctx.arc(cx, cy, rInner, arcEnd, arcStart, !ccw);
+            this.ctx.closePath();
+            this.ctx.fill();
+
+            // Draw edge arcs
+            this.ctx.strokeStyle = '#FFFFFF';
+            this.ctx.lineWidth = 3;
+
+            this.ctx.beginPath();
+            this.ctx.arc(cx, cy, rInner, arcStart, arcEnd, ccw);
+            this.ctx.stroke();
+
+            this.ctx.beginPath();
+            this.ctx.arc(cx, cy, rOuter, arcStart, arcEnd, ccw);
+            this.ctx.stroke();
+
+            // Dashed centre arc
+            this.ctx.strokeStyle = CONFIG.colors.roadLine;
+            this.ctx.lineWidth = 3;
+            this.ctx.setLineDash([30, 30]);
+            this.ctx.lineDashOffset = -this.roadOffset;
+            this.ctx.beginPath();
+            this.ctx.arc(cx, cy, d, arcStart, arcEnd, ccw);
+            this.ctx.stroke();
+            this.ctx.setLineDash([]);
+            this.ctx.lineDashOffset = 0;
+
+            this.ctx.restore(); // remove clip
+        }
     }
 
     // Draw all obstacles
     drawObstacles(obstacles) {
-        obstacles.forEach(obstacle => {
-            this.drawObstacle(obstacle);
-        });
+        obstacles.forEach(obstacle => this.drawObstacle(obstacle));
     }
 
     // Draw single obstacle
@@ -81,29 +190,23 @@ class Renderer {
         this.ctx.save();
         this.ctx.translate(x, y);
 
-        // Draw obstacle based on type
         if (obstacle.type === 'detected') {
-            // AI-detected objects - draw as rectangles with class label
+            // AI-detected objects
             this.ctx.fillStyle = obstacle.color;
             this.ctx.fillRect(-w / 2, -h / 2, w, h);
-
-            // Border
             this.ctx.strokeStyle = '#FFFFFF';
             this.ctx.lineWidth = 2;
             this.ctx.strokeRect(-w / 2, -h / 2, w, h);
 
-            // Label
             this.ctx.fillStyle = '#FFFFFF';
             this.ctx.font = '10px Arial';
             this.ctx.textAlign = 'center';
             this.ctx.fillText(obstacle.class, 0, -h / 2 - 5);
-
-            // Distance (relative depth)
             if (obstacle.distance != null) {
                 this.ctx.fillText(`d:${Math.round(obstacle.distance)}`, 0, h / 2 + 15);
             }
         } else if (obstacle.type === 'random') {
-            // Random obstacles - draw as cones
+            // Cone
             this.ctx.fillStyle = obstacle.color;
             this.ctx.beginPath();
             this.ctx.moveTo(0, -h / 2);
@@ -111,19 +214,15 @@ class Renderer {
             this.ctx.lineTo(w / 2, h / 2);
             this.ctx.closePath();
             this.ctx.fill();
-
             this.ctx.strokeStyle = '#FFFFFF';
             this.ctx.lineWidth = 2;
             this.ctx.stroke();
         } else if (obstacle.type === 'user') {
-            // User obstacles - draw as barrels
+            // Barrel
             this.ctx.fillStyle = obstacle.color;
             this.ctx.fillRect(-w / 2, -h / 2, w, h);
-
-            // Stripes
             this.ctx.fillStyle = '#000000';
             this.ctx.fillRect(-w / 2, -h / 6, w, h / 3);
-
             this.ctx.strokeStyle = '#FFFFFF';
             this.ctx.lineWidth = 2;
             this.ctx.strokeRect(-w / 2, -h / 2, w, h);
@@ -132,7 +231,7 @@ class Renderer {
         this.ctx.restore();
     }
 
-    // Draw the player's car at its current position
+    // Draw the player's car
     drawCar(carX, carY, rotation) {
         const w = CONFIG.car.width;
         const h = CONFIG.car.height;
@@ -141,11 +240,9 @@ class Renderer {
         this.ctx.translate(carX, carY);
         this.ctx.rotate((rotation || 0) * Math.PI / 180);
 
-        // Car body
         this.ctx.fillStyle = CONFIG.colors.car;
         this.ctx.fillRect(-w / 2, -h / 2, w, h);
 
-        // Car details
         // Windshield
         this.ctx.fillStyle = '#1a1a2e';
         this.ctx.fillRect(-w / 2 + 5, -h / 2 + 5, w - 10, h / 3);
@@ -163,7 +260,7 @@ class Renderer {
         this.ctx.restore();
     }
 
-    // Draw game over effect
+    // Draw game over overlay
     drawGameOver() {
         this.ctx.fillStyle = 'rgba(231, 76, 60, 0.3)';
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);

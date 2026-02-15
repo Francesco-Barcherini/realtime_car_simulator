@@ -32,46 +32,56 @@ const CONFIG = {
         maxRotation: 45 // max steering angle in degrees
     },
 
-    // Rendering
+    // Rendering – fill most of the browser window
     canvas: {
-        width: 800,
-        height: 600,
+        width: 1280,
+        height: 900,
         fps: 30
     },
 
     // Road
     road: {
-        width: 400, // road width in pixels
+        width: 500, // road width in pixels
         laneCount: 3,
         scrollSpeed: 100 // base scroll speed
     },
 
     // Car
     car: {
-        width: 40,
-        height: 70,
-        x: 400, // center of canvas (will be calculated)
-        y: 450 // near bottom of canvas
+        width: 44,
+        height: 78,
+        x: 640, // center of canvas
+        y: 750  // near bottom of canvas
+    },
+
+    // Reference point (where depth=255 maps, just above the car)
+    referencePoint: {
+        x: 640,
+        y: 750
     },
 
     // Obstacles
     obstacles: {
         spawnRate: 2000, // milliseconds between random spawns
         minDistance: 100, // minimum distance from car
-        maxVisible: 20 // maximum obstacles on screen
+        maxVisible: 20,  // maximum obstacles on screen
+        // How many recent AI frames to keep (N=1 → only latest frame)
+        detectionHistory: 1,
+        // Constant for w_real = sizeConstant * w_detected * depth
+        sizeConstant: 30
     },
 
     // COCO Dataset Classes for Road Traffic
-    // https://github.com/ultralytics/ultralytics/blob/main/ultralytics/cfg/datasets/coco.yaml
+    // heightRatio = rendered height / rendered width (top-down 2D view)
     cocoClasses: {
-        0: { name: 'person', color: '#FF6B6B', size: 30 },
-        1: { name: 'bicycle', color: '#4ECDC4', size: 40 },
-        2: { name: 'car', color: '#45B7D1', size: 50 },
-        3: { name: 'motorcycle', color: '#FFA07A', size: 35 },
-        5: { name: 'bus', color: '#98D8C8', size: 80 },
-        7: { name: 'truck', color: '#6C5CE7', size: 70 },
-        9: { name: 'traffic light', color: '#FDCB6E', size: 25 },
-        11: { name: 'stop sign', color: '#E17055', size: 30 }
+        0: { name: 'person', color: '#FF6B6B', size: 30, heightRatio: 1.2 },
+        1: { name: 'bicycle', color: '#4ECDC4', size: 40, heightRatio: 2.0 },
+        2: { name: 'car', color: '#45B7D1', size: 50, heightRatio: 1.8 },
+        3: { name: 'motorcycle', color: '#FFA07A', size: 35, heightRatio: 2.2 },
+        5: { name: 'bus', color: '#98D8C8', size: 80, heightRatio: 2.5 },
+        7: { name: 'truck', color: '#6C5CE7', size: 70, heightRatio: 2.3 },
+        9: { name: 'traffic light', color: '#FDCB6E', size: 25, heightRatio: 2.5 },
+        11: { name: 'stop sign', color: '#E17055', size: 30, heightRatio: 1.0 }
     },
 
     // Colors
@@ -84,6 +94,10 @@ const CONFIG = {
         hudBackground: 'rgba(0, 0, 0, 0.5)'
     }
 };
+
+// Sync reference point with car defaults
+CONFIG.referencePoint.x = CONFIG.car.x;
+CONFIG.referencePoint.y = CONFIG.car.y;
 
 // Export for use in other modules
 if (typeof module !== 'undefined' && module.exports) {
