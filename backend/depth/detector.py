@@ -17,8 +17,8 @@ TARGET_CLASSES = {
     3: "motorcycle",
     5: "bus",
     7: "truck",
-    9: "traffic light",
-    11: "stop sign",
+    # 9: "traffic light",
+    # 11: "stop sign",
 }
 TARGET_CLASS_IDS = list(TARGET_CLASSES.keys())
 
