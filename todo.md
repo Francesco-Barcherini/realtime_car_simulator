@@ -1,5 +1,5 @@
 - [x] Frontend: sistemare oggetti laterali che non vengono detectati a lato della macchina ma solo in fondo più piccoli
-- [] Switch file - camera: check funzionamento e enqueue
+- [x] Switch file - camera: check funzionamento e enqueue
 - [x] Test con camera RPi
 - [x] Usare iconcine per oggetti detectati e non rettangoli
 - [] Test performance modelli su RPi e PC ???

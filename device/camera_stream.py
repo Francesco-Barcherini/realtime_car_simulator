@@ -15,6 +15,7 @@ import json
 import threading
 import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
 from typing import Optional
 
 import cv2
@@ -227,14 +228,20 @@ class StreamHandler(BaseHTTPRequestHandler):
         pass  # suppress per-request logs
 
 
+class _ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    """Handle each request in a new thread so the MJPEG stream
+    does not block source-switch POST requests."""
+    daemon_threads = True
+
+
 def start_camera_stream(host: str = "0.0.0.0", port: int = 5000):
     """Start the HTTP server (blocking)."""
     global _camera
     default_video = os.path.join(VIDEO_DIR, "drive.mp4")
     _camera = CameraCapture(default_file=default_video)
-    server = HTTPServer((host, port), StreamHandler)
+    server = _ThreadedHTTPServer((host, port), StreamHandler)
     print(f"[camera_stream] Streaming on http://{host}:{port}/video")
-    print(f"[camera_stream] Switch source via POST /source/camera or /source/file?path=...")
+    print("[camera_stream] Switch source via POST /source/camera or /source/file?path=...")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

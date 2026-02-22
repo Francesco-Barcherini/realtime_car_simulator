@@ -32,7 +32,7 @@ def on_message(client, userdata, msg):
     payload = msg.payload.decode("utf-8", errors="replace")
     if len(payload) > 120:
         payload = payload[:120] + "…"
-    print(f"[mqtt] {msg.topic}: {payload}")
+    # print(f"[mqtt] {msg.topic}: {payload}")
 
 
 # ── Main ──────────────────────────────────────────────────────────
