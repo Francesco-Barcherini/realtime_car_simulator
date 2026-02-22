@@ -41,7 +41,7 @@ const CONFIG = {
 
     // Road
     road: {
-        width: 500, // road width in pixels
+        width: 650, // road width in pixels
         laneCount: 3,
         scrollSpeed: 100 // base scroll speed
     },
