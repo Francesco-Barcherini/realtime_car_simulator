@@ -191,13 +191,18 @@ class Renderer {
         this.ctx.translate(x, y);
 
         if (obstacle.type === 'detected') {
-            // AI-detected objects
-            this.ctx.fillStyle = obstacle.color;
-            this.ctx.fillRect(-w / 2, -h / 2, w, h);
-            this.ctx.strokeStyle = '#FFFFFF';
-            this.ctx.lineWidth = 2;
-            this.ctx.strokeRect(-w / 2, -h / 2, w, h);
+            // Dispatch to per-class icon drawing
+            switch (obstacle.class) {
+                case 'car':       this._drawCar2D(w, h, obstacle.color); break;
+                case 'truck':     this._drawTruck2D(w, h, obstacle.color); break;
+                case 'bus':       this._drawBus2D(w, h, obstacle.color); break;
+                case 'person':    this._drawPerson2D(w, h, obstacle.color); break;
+                case 'bicycle':   this._drawBicycle2D(w, h, obstacle.color); break;
+                case 'motorcycle': this._drawMotorcycle2D(w, h, obstacle.color); break;
+                default:          this._drawGeneric2D(w, h, obstacle.color); break;
+            }
 
+            // Label + distance
             this.ctx.fillStyle = '#FFFFFF';
             this.ctx.font = '10px Arial';
             this.ctx.textAlign = 'center';
@@ -258,6 +263,189 @@ class Renderer {
         this.ctx.strokeRect(-w / 2, -h / 2, w, h);
 
         this.ctx.restore();
+    }
+
+    // ── Per-class top-down icon renderers ───────────────────────
+    // All drawn centred at (0,0) within the obstacle's w×h bounds.
+
+    // Car: rounded body, rear window, two headlights
+    _drawCar2D(w, h, color) {
+        const ctx = this.ctx;
+        const r = Math.min(w, h) * 0.18;
+        // Body
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(-w/2 + r, -h/2);
+        ctx.lineTo( w/2 - r, -h/2);
+        ctx.quadraticCurveTo( w/2, -h/2,  w/2, -h/2 + r);
+        ctx.lineTo( w/2,  h/2 - r);
+        ctx.quadraticCurveTo( w/2,  h/2,  w/2 - r,  h/2);
+        ctx.lineTo(-w/2 + r,  h/2);
+        ctx.quadraticCurveTo(-w/2,  h/2, -w/2,  h/2 - r);
+        ctx.lineTo(-w/2, -h/2 + r);
+        ctx.quadraticCurveTo(-w/2, -h/2, -w/2 + r, -h/2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#FFF'; ctx.lineWidth = 1.5; ctx.stroke();
+        // Windshield (front = top)
+        ctx.fillStyle = 'rgba(150,220,255,0.6)';
+        ctx.fillRect(-w/2 + w*0.15, -h/2 + h*0.05, w*0.7, h*0.22);
+        // Rear window
+        ctx.fillStyle = 'rgba(150,220,255,0.35)';
+        ctx.fillRect(-w/2 + w*0.2,  h/2 - h*0.25, w*0.6, h*0.18);
+        // Headlights
+        ctx.fillStyle = '#FFFF00';
+        ctx.fillRect(-w/2 + 3, -h/2 + 1, w*0.18, h*0.06);
+        ctx.fillRect( w/2 - 3 - w*0.18, -h/2 + 1, w*0.18, h*0.06);
+        // Tail lights
+        ctx.fillStyle = '#FF2020';
+        ctx.fillRect(-w/2 + 3, h/2 - h*0.06, w*0.15, h*0.05);
+        ctx.fillRect( w/2 - 3 - w*0.15, h/2 - h*0.06, w*0.15, h*0.05);
+    }
+
+    // Truck: elongated box, cab at front, cargo area
+    _drawTruck2D(w, h, color) {
+        const ctx = this.ctx;
+        // Cargo
+        ctx.fillStyle = color;
+        ctx.fillRect(-w/2, -h/2 + h*0.25, w, h*0.75);
+        ctx.strokeStyle = '#FFF'; ctx.lineWidth = 1.5;
+        ctx.strokeRect(-w/2, -h/2 + h*0.25, w, h*0.75);
+        // Cab
+        const cabColor = this._lighten(color, 30);
+        ctx.fillStyle = cabColor;
+        ctx.fillRect(-w/2 + w*0.1, -h/2, w*0.8, h*0.3);
+        ctx.strokeRect(-w/2 + w*0.1, -h/2, w*0.8, h*0.3);
+        // Windshield
+        ctx.fillStyle = 'rgba(150,220,255,0.6)';
+        ctx.fillRect(-w/2 + w*0.2, -h/2 + h*0.03, w*0.6, h*0.12);
+        // Headlights
+        ctx.fillStyle = '#FFFF00';
+        ctx.fillRect(-w/2 + w*0.1, -h/2 + 1, w*0.15, h*0.05);
+        ctx.fillRect( w/2 - w*0.1 - w*0.15, -h/2 + 1, w*0.15, h*0.05);
+    }
+
+    // Bus: long rectangle, row of windows
+    _drawBus2D(w, h, color) {
+        const ctx = this.ctx;
+        ctx.fillStyle = color;
+        ctx.fillRect(-w/2, -h/2, w, h);
+        ctx.strokeStyle = '#FFF'; ctx.lineWidth = 1.5;
+        ctx.strokeRect(-w/2, -h/2, w, h);
+        // Window strip (left + right sides)
+        ctx.fillStyle = 'rgba(150,220,255,0.5)';
+        const winH = h * 0.06;
+        const gap = h * 0.1;
+        for (let wy = -h/2 + h*0.12; wy < h/2 - h*0.1; wy += gap) {
+            ctx.fillRect(-w/2 + 2, wy, w*0.12, winH);
+            ctx.fillRect( w/2 - 2 - w*0.12, wy, w*0.12, winH);
+        }
+        // Front windshield
+        ctx.fillStyle = 'rgba(150,220,255,0.6)';
+        ctx.fillRect(-w/2 + w*0.15, -h/2 + h*0.02, w*0.7, h*0.08);
+    }
+
+    // Person: circle head + body oval (from above)
+    _drawPerson2D(w, h, color) {
+        const ctx = this.ctx;
+        const headR = w * 0.35;
+        // Head (circle at top)
+        ctx.fillStyle = '#FFD5A0';
+        ctx.beginPath();
+        ctx.arc(0, -h/2 + headR + 1, headR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#333'; ctx.lineWidth = 1; ctx.stroke();
+        // Body (ellipse below head)
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.ellipse(0, h*0.15, w*0.4, h*0.38, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#333'; ctx.lineWidth = 1; ctx.stroke();
+    }
+
+    // Bicycle: two wheels + frame triangle
+    _drawBicycle2D(w, h, color) {
+        const ctx = this.ctx;
+        const wheelR = w * 0.3;
+        // Rear wheel (bottom)
+        ctx.strokeStyle = '#333'; ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, h/2 - wheelR - 1, wheelR, 0, Math.PI * 2);
+        ctx.stroke();
+        // Front wheel (top)
+        ctx.beginPath();
+        ctx.arc(0, -h/2 + wheelR + 1, wheelR, 0, Math.PI * 2);
+        ctx.stroke();
+        // Frame
+        ctx.strokeStyle = color; ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(0, -h/2 + wheelR + 1);
+        ctx.lineTo(-w*0.15, 0);
+        ctx.lineTo( w*0.15, 0);
+        ctx.lineTo(0, h/2 - wheelR - 1);
+        ctx.stroke();
+        // Handlebars
+        ctx.beginPath();
+        ctx.moveTo(-w*0.35, -h/2 + wheelR*0.7);
+        ctx.lineTo( w*0.35, -h/2 + wheelR*0.7);
+        ctx.stroke();
+        // Seat dot
+        ctx.fillStyle = '#333';
+        ctx.beginPath();
+        ctx.arc(0, h*0.05, w*0.1, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // Motorcycle: similar to bicycle but thicker wheels + engine block
+    _drawMotorcycle2D(w, h, color) {
+        const ctx = this.ctx;
+        const wheelR = w * 0.32;
+        // Rear wheel
+        ctx.fillStyle = '#222';
+        ctx.beginPath();
+        ctx.arc(0, h/2 - wheelR - 1, wheelR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#555'; ctx.lineWidth = 3; ctx.stroke();
+        // Front wheel
+        ctx.fillStyle = '#222';
+        ctx.beginPath();
+        ctx.arc(0, -h/2 + wheelR + 1, wheelR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#555'; ctx.lineWidth = 3; ctx.stroke();
+        // Body/engine block
+        ctx.fillStyle = color;
+        ctx.fillRect(-w*0.3, -h*0.12, w*0.6, h*0.25);
+        ctx.strokeStyle = '#FFF'; ctx.lineWidth = 1; ctx.strokeRect(-w*0.3, -h*0.12, w*0.6, h*0.25);
+        // Exhaust
+        ctx.fillStyle = '#888';
+        ctx.fillRect(w*0.2, h*0.1, w*0.2, h*0.06);
+        // Handlebars
+        ctx.strokeStyle = '#CCC'; ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-w*0.4, -h/2 + wheelR*0.5);
+        ctx.lineTo( w*0.4, -h/2 + wheelR*0.5);
+        ctx.stroke();
+    }
+
+    // Fallback for unknown classes
+    _drawGeneric2D(w, h, color) {
+        const ctx = this.ctx;
+        ctx.fillStyle = color;
+        ctx.fillRect(-w/2, -h/2, w, h);
+        ctx.strokeStyle = '#FFF'; ctx.lineWidth = 2;
+        ctx.strokeRect(-w/2, -h/2, w, h);
+        ctx.fillStyle = '#FFF'; ctx.font = `${Math.max(8, w*0.3)|0}px Arial`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('?', 0, 0);
+    }
+
+    // Utility: lighten a hex colour by `amount` (0–255)
+    _lighten(hex, amount) {
+        const num = parseInt(hex.replace('#', ''), 16);
+        const r = Math.min(255, ((num >> 16) & 0xFF) + amount);
+        const g = Math.min(255, ((num >> 8) & 0xFF) + amount);
+        const b = Math.min(255, (num & 0xFF) + amount);
+        return `rgb(${r},${g},${b})`;
     }
 
     // Draw game over overlay
