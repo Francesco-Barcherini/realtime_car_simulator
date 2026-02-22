@@ -12,6 +12,12 @@ class ObstacleManager {
 
         // Score tracking: count user/random obstacles that exit the screen
         this.obstaclesPassed = 0;
+
+        // Per-AI-ID size history for lateral-exit correction
+        // Map<aiId, { samples: number[], baseline: number|null }>
+        this._sizeHistory = new Map();
+        this._baselineWindow = CONFIG.obstacles.lateralBaselineWindow || 20;
+        this._shrinkThreshold = CONFIG.obstacles.lateralShrinkThreshold || 0.50;
     }
 
     // ── AI-detected obstacles ───────────────────────────────────
@@ -34,10 +40,49 @@ class ObstacleManager {
                 classInfo = { name: aiObj.class || 'unknown', color: '#FFFFFF', size: 40, heightRatio: 1.5 };
             }
 
-            // w_real = K * w_detected / depth  (depth is inverse of distance)
+            // ── lateral-exit correction ──────────────────────────
+            // The "real size" proxy is bboxW / depth (independent of distance).
+            // Track this ratio per AI ID; if it drops significantly for a
+            // lateral object, keep the original ratio → constant rendered size.
+            const aid = aiObj.id;
+            const safeDepth = Math.max(depthValue, 1);
+            const currentRatio = bboxW / safeDepth;  // real-size proxy
+            let effectiveRatio = currentRatio;
+
+            if (!this._sizeHistory.has(aid)) {
+                this._sizeHistory.set(aid, { samples: [], baseline: null });
+            }
+            const hist = this._sizeHistory.get(aid);
+
+            // Add ratio sample to history (up to baselineWindow)
+            if (hist.samples.length < this._baselineWindow) {
+                hist.samples.push(currentRatio);
+            }
+            // Compute baseline as average of first M samples
+            if (hist.samples.length > 0 && hist.baseline === null &&
+                hist.samples.length >= this._baselineWindow) {
+                hist.baseline = hist.samples.reduce((a, b) => a + b, 0) / hist.samples.length;
+            }
+            
+            if (hist.baseline !== null && hist.baseline > 0) {
+                const shrinkRatio = 1 - (currentRatio / hist.baseline);
+                // Only correct for objects near the lateral edges
+                // of the camera frame (left 25% or right 25%)
+                const bboxCentreX = bboxX + bboxW / 2;
+                const camWidth = 640;
+                const edgeMargin = camWidth * 0.25;
+                const isLateral = bboxCentreX < edgeMargin ||
+                                  bboxCentreX > camWidth - edgeMargin;
+
+                if (isLateral && shrinkRatio >= this._shrinkThreshold) {
+                    // Use baseline ratio → keeps rendered size constant
+                    effectiveRatio = hist.baseline;
+                }
+            }
+
+            // w_real = K * (bboxW / depth), using the effective ratio
             const K = CONFIG.obstacles.sizeConstant;
-            const safeDepth = Math.max(depthValue, 1); // avoid division by zero
-            const obsWidth  = Math.max(10, K * bboxW / safeDepth);
+            const obsWidth  = Math.max(10, K * effectiveRatio);
             // Height from fixed per-class aspect ratio (top-down 2D view)
             const hRatio = classInfo.heightRatio || 1.5;
             const obsHeight = obsWidth * hRatio;
@@ -234,6 +279,7 @@ class ObstacleManager {
     clear() {
         this.obstacles = [];
         this._detectionFrames = [];
+        this._sizeHistory.clear();
         this.obstaclesPassed = 0;
     }
 

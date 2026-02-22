@@ -51,7 +51,7 @@ const CONFIG = {
         width: 44,
         height: 78,
         x: 640, // center of canvas
-        y: 750  // near bottom of canvas
+        y: 650  // near bottom of canvas
     },
 
     // Reference point (where depth=255 maps, just above the car)
@@ -67,8 +67,13 @@ const CONFIG = {
         maxVisible: 20,  // maximum obstacles on screen
         // How many recent AI frames to keep (N=1 → only latest frame)
         detectionHistory: 1,
-        // Constant for w_real = sizeConstant * w_detected * depth
-        sizeConstant: 30
+        // Constant for w_real = sizeConstant * w_detected / depth
+        sizeConstant: 30,
+        // Lateral-exit correction: if bbox width shrinks by >= this ratio
+        // vs. baseline, treat it as a lateral object keeping original size
+        lateralShrinkThreshold: 0.10,  // shrink triggers correction
+        // Number of first detections to average for baseline width
+        lateralBaselineWindow: 3
     },
 
     // COCO Dataset Classes for Road Traffic
