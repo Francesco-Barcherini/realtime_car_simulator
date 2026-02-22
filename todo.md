@@ -1,9 +1,9 @@
 - [] Frontend: sistemare oggetti laterali che non vengono detectati a lato della macchina ma solo in fondo più piccoli
 - [] Switch file - camera: check funzionamento e enqueue
-- [] Test con camera RPi
+- [x] Test con camera RPi
 - [] Usare iconcine per oggetti detectati e non rettangoli
 - [] Test performance modelli su RPi e PC ???
-- [] Configurare VPN e indirizzi per accesso remoto
+- [x] Configurare VPN e indirizzi per accesso remoto
 
 - modello dove esegue? PC ma confrontiamo anche con RPi (fa schifo)
 - server su PC che riceve stream video

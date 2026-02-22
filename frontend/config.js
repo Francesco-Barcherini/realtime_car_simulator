@@ -4,7 +4,7 @@ const CONFIG = {
     // MQTT Configuration
     // broker runs on the backend PC (same machine as Mosquitto)
     mqtt: {
-        broker: '10.30.7.22' || window.location.hostname || 'localhost',
+        broker: '10.97.150.3' || window.location.hostname || 'localhost',
         port: 9001, // WebSocket port (default for MQTT over WebSocket)
         clientId: 'car_simulator_' + Math.random().toString(16).substr(2, 8),
         topics: {
@@ -18,7 +18,7 @@ const CONFIG = {
 
     // Device (Raspberry Pi) – camera stream lives here
     device: {
-        host: '10.1.56.79',  // RPi IP from conf.conf
+        host: '10.97.150.2',  // RPi IP from conf.conf
         streamPort: 5000
     },
 
